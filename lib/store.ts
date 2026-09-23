@@ -61,40 +61,65 @@ export async function ensureReady(): Promise<void> {
     if (!fs.existsSync(file("activity.json"))) writeJson("activity.json", []);
     if (!fs.existsSync(file("alerts.json"))) writeJson("alerts.json", []);
     if (!fs.existsSync(file("tickets.json"))) writeJson("tickets.json", []);
-    ensureTodayTickets();
+    ensureEstimates();
+    ensureDemoSprint();
   });
 }
 
-function ensureTodayTickets() {
+function ensureEstimates() {
   const recipes = readJson<Recipe[]>("recipes.json", []);
-  const tickets = readJson<Ticket[]>("tickets.json", []);
-  const today = chicagoDate();
   let changed = false;
   for (const recipe of recipes) {
-    const exists = tickets.some((t) => t.recipeId === recipe.id && t.serviceDate === today);
-    if (exists) continue;
-    const due = chicagoLocalToUtc(today, recipe.defaultDueTime);
-    tickets.push({
-      id: `t_${randomBytes(6).toString("hex")}`,
-      recipeId: recipe.id,
-      serviceDate: today,
-      dueAt: due.toISOString(),
-      batches: 1,
-      status: "open",
-      assignee: null,
-      claimedAt: null,
-      startedAt: null,
-      doneAt: null,
-      shortageAck: false,
-      stockMoved: false,
-      qtyMade: null,
-      squareMoved: false,
-      squareError: null,
-      createdAt: new Date().toISOString(),
-    });
-    changed = true;
+    if (recipe.estimateHours == null || recipe.estimateMinutes == null) {
+      const total = Math.max(0, Math.round(recipe.prepMinutes || 0));
+      recipe.estimateHours = Math.floor(total / 60);
+      recipe.estimateMinutes = total % 60;
+      changed = true;
+    }
   }
-  if (changed) writeJson("tickets.json", tickets);
+  if (changed) writeJson("recipes.json", recipes);
+}
+
+/**
+ * Templates stay in the backlog forever. A fresh data dir gets one card in
+ * today's sprint so the board is not blank. Later days do not mint tickets.
+ */
+function ensureDemoSprint() {
+  if (fs.existsSync(file("sprint-seeded.json"))) return;
+  const tickets = readJson<Ticket[]>("tickets.json", []);
+  if (tickets.length === 0) {
+    const recipes = readJson<Recipe[]>("recipes.json", []);
+    const cookie = recipes.find((recipe) => recipe.id === "cookie") ?? recipes[0];
+    if (cookie) {
+      tickets.push(newOpenTicket(cookie, chicagoDate()));
+      writeJson("tickets.json", tickets);
+    }
+  }
+  writeJson("sprint-seeded.json", { seeded: true, at: new Date().toISOString() });
+}
+
+export function newOpenTicket(recipe: Recipe, serviceDate: string): Ticket {
+  const due = chicagoLocalToUtc(serviceDate, recipe.defaultDueTime);
+  return {
+    id: `t_${randomBytes(6).toString("hex")}`,
+    recipeId: recipe.id,
+    serviceDate,
+    dueAt: due.toISOString(),
+    batches: 1,
+    status: "open",
+    assignee: null,
+    claimedAt: null,
+    startedAt: null,
+    doneAt: null,
+    timerElapsedMs: 0,
+    timerRunningSince: null,
+    shortageAck: false,
+    stockMoved: false,
+    qtyMade: null,
+    squareMoved: false,
+    squareError: null,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 export function loadDb(): DB {

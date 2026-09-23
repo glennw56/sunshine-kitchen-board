@@ -62,6 +62,16 @@ fi
 if [[ -n "${INVENTORY_SERVICE:-}" && "${INVENTORY_SERVICE}" != "${ALLOWED_INVENTORY_SERVICE}" ]]; then
   refuse "INVENTORY_SERVICE=${INVENTORY_SERVICE}"
 fi
+# HTTP scrape of the inventory app returns 0 catalog rows. This service reads GCS.
+if [[ -n "${INVENTORY_TRANSPORT:-}" && "${INVENTORY_TRANSPORT}" != "gcs" ]]; then
+  refuse "INVENTORY_TRANSPORT=${INVENTORY_TRANSPORT}. ${ALLOWED_SERVICE} uses gcs."
+fi
+export INVENTORY_TRANSPORT=gcs
+export INVENTORY_GCS_BUCKET="${INVENTORY_GCS_BUCKET:-bakery-444323-sunshine-inventory-test}"
+if [[ "${INVENTORY_GCS_BUCKET}" != "bakery-444323-sunshine-inventory-test" ]]; then
+  refuse "INVENTORY_GCS_BUCKET=${INVENTORY_GCS_BUCKET}"
+fi
+export INVENTORY_GCS_OBJECT="${INVENTORY_GCS_OBJECT:-catalog.json}"
 
 : "${AUTH_SECRET:?AUTH_SECRET is required in deploy.env}"
 if [[ ${#AUTH_SECRET} -lt 16 ]]; then
@@ -78,7 +88,7 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/sunshine/${SERVICE}:${TAG}"
 echo "Deploying ${SERVICE} to ${PROJECT} / ${REGION}"
 echo "Image ${IMAGE}"
 echo "Data bucket gs://${BUCKET} mounted at /data"
-echo "Inventory stays on sunshine-inventory-test only."
+echo "Inventory gcs gs://${INVENTORY_GCS_BUCKET}/${INVENTORY_GCS_OBJECT}"
 
 gcloud artifacts repositories describe sunshine \
   --project="${PROJECT}" \
@@ -101,7 +111,9 @@ path = sys.argv[1]
 values = {
     "DATA_DIR": "/data",
     "TZ": "America/Chicago",
-    "INVENTORY_TRANSPORT": "http",
+    "INVENTORY_TRANSPORT": os.environ.get("INVENTORY_TRANSPORT") or "gcs",
+    "INVENTORY_GCS_BUCKET": os.environ.get("INVENTORY_GCS_BUCKET") or "bakery-444323-sunshine-inventory-test",
+    "INVENTORY_GCS_OBJECT": os.environ.get("INVENTORY_GCS_OBJECT") or "catalog.json",
     "INVENTORY_BASE_URL": os.environ.get("INVENTORY_BASE_URL") or "https://sunshine-inventory-test-k6uuoen7wa-ue.a.run.app",
     "TIMECLOCK_BASE_URL": os.environ.get("TIMECLOCK_BASE_URL") or "https://sunshine-timeclock-k6uuoen7wa-ue.a.run.app",
     "SQUARE_API_BASE": os.environ.get("SQUARE_API_BASE") or "https://connect.squareup.com",
@@ -115,7 +127,6 @@ optional = [
     "ADMIN_INITIAL_PASSWORD",
     "INVENTORY_EMAIL",
     "INVENTORY_PASSWORD",
-    "INVENTORY_GCS_BUCKET",
     "TIMECLOCK_IDENTIFIER",
     "TIMECLOCK_PASSWORD",
     "SLACK_BOT_TOKEN",

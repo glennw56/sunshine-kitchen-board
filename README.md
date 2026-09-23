@@ -1,14 +1,14 @@
 # Sunshine kitchen board
 
-Phone and tablet bake-day board for Sunshine's Bakery. A recipe is a finished item, a batch, a due time, and the steps that get it there. Staff claim, start, and finish today's tickets. Finishing deducts raw ingredients and adds cooked goods in the same inventory the shop already trusts. There is no second stock database.
+Phone and tablet bake-day board for Sunshine's Bakery. Standing task templates live in a backlog. Cooks pull one into today's sprint and move it across the board. Finishing deducts raw ingredients and adds cooked goods in the same inventory the shop already trusts. There is no second stock database.
 
 This repository deploys **only** the Cloud Run test service `sunshine-kitchen-board-test` in project `bakery-444323`, region `us-east1`. It does not promote anything to production.
 
 ## What v1 includes
 
-Four tabs. A phone keeps a bottom bar and a single column of tickets. A counter tablet (about 768px wide and tall enough to sit on the pass) gets its own frame: a side rail, larger type, and Claim / Start / Done as three equal glove-sized buttons. Phone landscape stays on the phone layout so a short screen is not a squeezed tablet.
+Four tabs. A phone keeps a bottom bar and swipes the sprint columns. A counter tablet (about 768px wide and tall enough to sit on the pass) gets its own frame: a side rail, larger type, and glove-sized column buttons. Phone landscape stays on the phone layout so a short screen is not a squeezed tablet.
 
-1. **Board** — a day schedule headed **Today**, then cooks currently clocked in when the time clock answers, then a flat list ordered by start time (due minus prep). Each line is the start time and the task name. Tap a row to claim, start, or finish. Done asks how many were made; that amount is what gets added to the finished SKU and to Square Test Cook. Shortage warning before start. The same screen still shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes.
+1. **Board** — a daily sprint (one per America/Chicago calendar day) with columns **Backlog / To Do / In Progress / Done**. Backlog templates stay forever. **Add to sprint** copies one into today's To Do. Moving into In Progress starts a live timer; moving back to To Do pauses it; Done stops it and asks how many were made. That amount is added to the finished SKU and to Square Test Cook. Estimates show as hours and minutes. Shortage warning before In Progress. The same screen still shows bake-day raw on-hand and cooked counts for SKUs on today's sprint.
 2. **Raw** — on-hand and small kitchen adjustments for those same today's ingredients, read and written through sunshine-inventory-test. Link recipe lines to SKUs that already exist. Full CSV, recounts, and catalog browsing stay in the inventory app.
 3. **Cooked** — add, remove, and pull for today's finished SKUs that already exist in the tax-exempt inventory catalog. Unknown SKUs are refused.
 4. **Live** — read-only who's punched in and recent punches from the Sunshine time clock. Filter by store (Irondale by default) and keep the kitchen view on cooks. This app never clocks anyone in or out.
@@ -25,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. The dev default `INVENTORY_TRANSPORT=file` copies `fixtures/dev-catalog.json` into `data/dev-catalog.json` so the board is usable before inventory credentials exist. That file is a local stand-in. Production deploy forces `INVENTORY_TRANSPORT=http` against the inventory test app.
+Open http://localhost:3000. The dev default `INVENTORY_TRANSPORT=file` copies `fixtures/dev-catalog.json` into `data/dev-catalog.json` so the board is usable before inventory credentials exist. That file is a local stand-in. The test deploy uses `INVENTORY_TRANSPORT=gcs` and object `catalog.json` in the inventory test bucket.
 
 On first boot the owner password is generated (scrypt hash in `data/admin.json`). The plaintext is written once to `data/owner-password.txt`. Hand that to the owner, then delete the file. It is gitignored. Reset anytime with:
 
@@ -49,11 +49,11 @@ npm test
 | `DATA_DIR` | JSON store. Local default `./data`. Cloud Run `/data`. |
 | `ADMIN_EMAIL` | Owner email. Default `glenn.will799@gmail.com`. |
 | `ADMIN_INITIAL_PASSWORD` | Optional first-boot password. If empty, a random one is written to `owner-password.txt`. |
-| `INVENTORY_TRANSPORT` | `file`, `http`, `gcs`, or `auto`. Deploy uses `http`. |
+| `INVENTORY_TRANSPORT` | `file`, `http`, `gcs`, or `auto`. Test deploy sets `gcs` and refuses anything else. |
 | `INVENTORY_BASE_URL` | `https://sunshine-inventory-test-k6uuoen7wa-ue.a.run.app` |
 | `INVENTORY_EMAIL` / `INVENTORY_PASSWORD` | Admin login for the inventory test app (same account that can open the shop). Also sent as HTTP Basic to `POST /api/import`. |
-| `INVENTORY_GCS_BUCKET` | Optional. `bakery-444323-sunshine-inventory-test` if the kitchen board service account may read and write `data/catalog.json`. |
-| `INVENTORY_GCS_OBJECT` | Default `data/catalog.json`. |
+| `INVENTORY_GCS_BUCKET` | Test deploy sets `bakery-444323-sunshine-inventory-test`. |
+| `INVENTORY_GCS_OBJECT` | Test deploy sets `catalog.json`. The app falls back to `data/catalog.json` only when this variable is unset. |
 | `TIMECLOCK_BASE_URL` | Live clock `https://sunshine-timeclock-k6uuoen7wa-ue.a.run.app`. Test clock: `https://sunshine-timeclock-test-k6uuoen7wa-ue.a.run.app`. |
 | `TIMECLOCK_IDENTIFIER` / `TIMECLOCK_PASSWORD` | Read-only login. An admin user is required for the whole-floor timesheet. |
 | `TIMECLOCK_DEFAULT_STORE` | `Irondale`. Used when a punch has no store field. |
@@ -77,11 +77,11 @@ Discovered on the live test service (no guessed write API beyond what the app ac
 - `GET /api/health` is public. It reports `service: sunshine-inventory-test`, `dataDir: /data`, and files `catalog.json`, `orders.json`, `recounts.json`, `suppliers.json`, `settings.json`, `admin.json`.
 - `POST /api/import` is the machine write route. Without credentials it returns `401` and `{"ok":false,"error":"Admin sign-in required"}` with `WWW-Authenticate: Basic realm="Sunshine inventory"`.
 - The shop UI is a Next.js server-action login (email + password). Other `/api/*` paths redirect to `/login`.
-- Catalog JSON lives at `gs://bakery-444323-sunshine-inventory-test/data/catalog.json` (not anonymously readable).
+- The kitchen board test deploy reads `gs://bakery-444323-sunshine-inventory-test/catalog.json` (not anonymously readable). HTTP scraping that app returns no catalog rows, so deploy does not set `INVENTORY_TRANSPORT=http`.
 
 The HTTP client signs in with the same server-action the shop uses, reads catalog rows from the authenticated payload (or from a JSON export if one is returned), and writes by `POST /api/import`. A full-document write happens only when the read returned a JSON document that can be round-tripped. Otherwise a delta body is posted and the server's error is shown. SKUs that are not already in the catalog are never created.
 
-`INVENTORY_TRANSPORT=gcs` updates `onHand` in that same `catalog.json` and refuses missing SKUs. Use it only if this service account is allowed to write the inventory test bucket.
+`INVENTORY_TRANSPORT=gcs` updates `onHand` in `catalog.json` and refuses missing SKUs. The Cloud Run service account needs write access to the inventory test bucket.
 
 Cooked moves require a catalog SKU whose category looks like finished/cooked/baked, or a SKU that is a recipe's finished item. Raw deduct on Done uses catalog SKUs only.
 
@@ -167,6 +167,7 @@ The script exits if you pass another service name, or if `SERVICE` / `CLOUD_RUN_
 - GCS volume: `gs://bakery-444323-sunshine-kitchen-board-test` mounted at `/data`
 - Artifact Registry: `us-east1-docker.pkg.dev/bakery-444323/sunshine/sunshine-kitchen-board-test`
 - `DATA_DIR=/data`, `TZ=America/Chicago`
+- Inventory: `INVENTORY_TRANSPORT=gcs`, bucket `bakery-444323-sunshine-inventory-test`, object `catalog.json`
 
 After deploy, read the owner password once:
 
@@ -176,18 +177,18 @@ gcloud storage cat gs://bakery-444323-sunshine-kitchen-board-test/owner-password
 
 Give Glenn the service URL plus that email and password, then delete the object. The hash remains in `/data/admin.json`.
 
-The Cloud Run service account needs `storage.objectAdmin` on the kitchen board bucket. If you set `INVENTORY_GCS_BUCKET`, it also needs access to the inventory test bucket. Inventory HTTP mode only needs the admin email and password.
+The Cloud Run service account needs `storage.objectAdmin` on the kitchen board bucket and on `bakery-444323-sunshine-inventory-test`.
 
 ## Smoke checklist
 
-1. Open the board. The heading is Today. Three seeded tasks are a flat list ordered by start time (time, then name). Tap a row for steps, claim, start, and done.
-2. The board shows raw on-hand and cooked/finished counts for SKUs on today's tickets. The Raw tab shows those same lines, not the full catalog. With `INVENTORY_TRANSPORT=http` and the inventory admin password, quantities match sunshine-inventory-test. Link any recipe line whose SKU is not in that catalog.
+1. Open the board. The heading is Sprint plus today's Chicago date. Backlog lists the standing templates. To Do starts with the seeded cookie card. Estimates read like `35m` or `1h 30m`.
+2. The board shows raw on-hand and cooked/finished counts for SKUs on today's sprint. The Raw tab shows those same lines, not the full catalog. With `INVENTORY_TRANSPORT=gcs`, quantities match `catalog.json` in the inventory test bucket. Link any recipe line whose SKU is not in that catalog.
 3. Punch in a cook on the time clock (not on this board). Live tab, store Irondale, kitchen filter, shows that person. Confirm this app has no clock-in button.
-4. Enter a name, open a row, Claim → Start (acknowledge the butter shortage on croissants if you are on the file catalog) → Done. Enter the amount made. Raw on-hand drops by the recipe batch. The finished SKU and Square Test Cook increase by the amount you entered.
+4. Enter a name. On a backlog template, Add to sprint. On that To Do card, In Progress — the timer starts. Done, enter an amount that is not the planned yield. The timer stops. Raw on-hand drops by the recipe batch. The finished SKU and Square Test Cook increase by the amount you entered. Moving a running card back to To Do pauses the timer.
 5. Cooked tab: add, remove, and pull a finished catalog SKU. An unknown SKU is refused. Quantities match the inventory app afterward.
 6. Square item **Test Cook** (`HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5XQX`) changes by the same cooked amount. No other Square item changes. The app does not recreate the item.
 7. On the owner screen, set a claimed ticket to "Due 20 min ago". An open board beeps. Slack posts to the test channel (auto, or the Slack nudge button). A second auto post waits 15 minutes.
 8. In Slack, `/recipe` lists today and `/recipe croissant` shows ingredients and steps.
-9. Phone width: bottom tabs, one schedule column, rows and Claim / Start / Done at full tap height. Tablet on the counter (portrait and landscape): side rail instead of the bottom bar, larger type, and three equal action buttons inside an open row. Read a start time from arm's length.
+9. Phone width: bottom tabs, swipe the four columns, move buttons at full tap height. Tablet on the counter: side rail, two columns, then four columns when the screen is wide. Read an estimate and a running timer from arm's length.
 
 Owner login for the activity log and alert settings is the email above plus the generated password.
