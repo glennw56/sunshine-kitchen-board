@@ -1,20 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import type { CatalogItem } from "@/lib/types";
+import type { BakeDayStockLine } from "@/lib/types";
 
 export function CookedClient({
-  items,
+  lines,
   error,
   transport,
   square,
 }: {
-  items: CatalogItem[];
+  lines: BakeDayStockLine[];
   error: string | null;
   transport: string;
   square: { ok: boolean; quantity: string | null; error: string | null; label: string };
 }) {
-  const [sku, setSku] = useState(items[0]?.sku ?? "");
+  const selectable = lines.filter((line) => !line.missing);
+  const [sku, setSku] = useState(selectable[0]?.sku ?? "");
   const [qty, setQty] = useState(1);
   const [message, setMessage] = useState<string | null>(error);
   const [pending, setPending] = useState(false);
@@ -39,7 +40,9 @@ export function CookedClient({
 
   return (
     <div>
-      <p className="meta">Cooked goods only, and only SKUs already in the tax-exempt catalog. Transport: {transport}.</p>
+      <p className="meta">
+        Today&apos;s finished items only, and only SKUs already in the tax-exempt catalog. Transport: {transport}. Full catalog browsing stays in sunshine-inventory-test.
+      </p>
       <section className="card">
         <h2>Square Test Cook</h2>
         <p>{square.label}</p>
@@ -52,8 +55,8 @@ export function CookedClient({
         <h2>Move cooked stock</h2>
         <div className="row">
           <select aria-label="Cooked SKU" value={sku} onChange={(e) => setSku(e.target.value)}>
-            {items.map((item) => (
-              <option key={item.sku} value={item.sku}>{item.name} ({item.sku})</option>
+            {selectable.map((line) => (
+              <option key={line.sku} value={line.sku}>{line.name} ({line.sku})</option>
             ))}
           </select>
           <input aria-label="Quantity" type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
@@ -64,14 +67,14 @@ export function CookedClient({
       </section>
       <section className="card">
         <h2>Finished on hand</h2>
-        {items.length === 0 ? <p>No cooked/finished category in the catalog yet. Add the SKU in inventory first.</p> : null}
-        {items.map((item) => (
-          <div className="list-item" key={item.sku}>
+        {lines.length === 0 ? <p>No finished items on today&apos;s tickets.</p> : null}
+        {lines.map((line) => (
+          <div className="list-item" key={line.sku}>
             <div>
-              <strong>{item.name}</strong>
-              <div className="meta">{item.sku} · {item.category}</div>
+              <strong>{line.name}</strong>
+              <div className="meta">{line.missing ? `${line.sku} · not in catalog` : line.sku}</div>
             </div>
-            <span className="qty">{item.onHand} {item.unit}</span>
+            <span className="qty">{line.missing || line.onHand === null ? "—" : `${line.onHand} ${line.unit}`}</span>
           </div>
         ))}
       </section>

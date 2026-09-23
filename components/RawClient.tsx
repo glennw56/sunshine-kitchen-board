@@ -1,17 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { CatalogItem, Recipe } from "@/lib/types";
+import type { BakeDayStockLine, CatalogItem, Recipe } from "@/lib/types";
 
 export function RawClient({
-  items,
+  lines,
   all,
   recipes,
   error,
   transport,
   health,
 }: {
-  items: CatalogItem[];
+  lines: BakeDayStockLine[];
   all: CatalogItem[];
   recipes: Recipe[];
   error: string | null;
@@ -23,8 +23,8 @@ export function RawClient({
   const [pending, setPending] = useState(false);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return items.filter((item) => !q || `${item.sku} ${item.name} ${item.category}`.toLowerCase().includes(q));
-  }, [items, query]);
+    return lines.filter((line) => !q || `${line.sku} ${line.name}`.toLowerCase().includes(q));
+  }, [lines, query]);
 
   async function adjust(sku: string, delta: number) {
     setPending(true);
@@ -61,29 +61,40 @@ export function RawClient({
 
   return (
     <div>
-      <p className="meta">Same inventory truth as sunshine-inventory-test. Transport: {transport}. {health}</p>
+      <p className="meta">
+        Today&apos;s recipe ingredients only, from the same inventory as sunshine-inventory-test. Transport: {transport}. {health} Full catalog browsing stays in the inventory app.
+      </p>
       {message ? <p className="error">{message}</p> : null}
-      <input className="search" placeholder="Search raw SKUs" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <input className="search" placeholder="Search today's raw SKUs" value={query} onChange={(e) => setQuery(e.target.value)} />
       <section className="card">
         <h2>On hand</h2>
-        {shown.length === 0 ? <p>No raw items in this view.</p> : null}
-        {shown.map((item) => (
-          <div className="list-item" key={item.sku}>
+        {shown.length === 0 ? <p>No raw ingredients on today&apos;s tickets.</p> : null}
+        {shown.map((line) => (
+          <div className="list-item" key={line.sku}>
             <div>
-              <strong>{item.name}</strong>
-              <div className="meta">{item.sku} · {item.category || "uncategorized"}</div>
+              <strong>{line.name}</strong>
+              <div className="meta">
+                {line.sku}
+                {line.missing ? " · not in catalog" : ` · need ${line.need} ${line.unit}`}
+              </div>
             </div>
             <div className="row">
-              <span className="qty">{item.onHand} {item.unit}</span>
-              <button className="btn secondary" disabled={pending} onClick={() => adjust(item.sku, -1)}>-1</button>
-              <button className="btn" disabled={pending} onClick={() => adjust(item.sku, 1)}>+1</button>
+              <span className="qty">{line.missing || line.onHand === null ? "—" : `${line.onHand} ${line.unit}`}</span>
+              {line.missing ? null : (
+                <>
+                  <button className="btn secondary" disabled={pending} onClick={() => adjust(line.sku, -1)}>-1</button>
+                  <button className="btn" disabled={pending} onClick={() => adjust(line.sku, 1)}>+1</button>
+                </>
+              )}
             </div>
           </div>
         ))}
       </section>
       <section className="card">
         <h2>Link recipe lines</h2>
-        <p className="meta">Point each line at a SKU that already exists in the catalog. Unknown SKUs are refused.</p>
+        <p className="meta">
+          Point each line at a SKU that already exists. This picker is for linking, not browsing. Unknown SKUs are refused. Open sunshine-inventory-test for the full catalog.
+        </p>
         {recipes.map((recipe) => (
           <div key={recipe.id}>
             <h3>{recipe.name}</h3>

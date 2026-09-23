@@ -5,7 +5,7 @@ import { isOverdue, shouldSendAutoAlert, timingLabel } from "./alerts";
 import { mentionFor, postKitchenMessage, recipeSlackText } from "./slack";
 import { adjustTestCook } from "./square";
 import { ensureReady, loadDb, logActivity, updateDb } from "./store";
-import type { CatalogItem, Recipe, ShortageLine, Ticket } from "./types";
+import type { BakeDayStockLine, CatalogItem, Recipe, ShortageLine, Ticket } from "./types";
 import { formatChicago } from "./time";
 
 export async function boardSnapshot(now = new Date()) {
@@ -32,7 +32,52 @@ export async function boardSnapshot(now = new Date()) {
     inventoryError: inventory.error,
     inventoryTransport: inventory.transport,
     activity: db.activity.slice(-80).reverse(),
+    bakeDay: bakeDayStock(today, db.recipes, inventory.items),
   };
+}
+
+/** On-hand for SKUs tied to today's tickets. Not the full catalog. */
+export function bakeDayStock(tickets: Ticket[], recipes: Recipe[], items: CatalogItem[]): {
+  raw: BakeDayStockLine[];
+  cooked: BakeDayStockLine[];
+} {
+  const raw = new Map<string, BakeDayStockLine>();
+  const cooked = new Map<string, BakeDayStockLine>();
+  for (const ticket of tickets) {
+    const recipe = recipes.find((item) => item.id === ticket.recipeId);
+    if (!recipe) continue;
+    const open = ticket.status !== "done";
+    for (const ingredient of recipe.ingredients) {
+      const prev = raw.get(ingredient.sku);
+      const item = items.find((row) => row.sku === ingredient.sku);
+      const need = round3((prev?.need ?? 0) + (open ? ingredient.qty * ticket.batches : 0));
+      const onHand = item ? item.onHand : null;
+      raw.set(ingredient.sku, {
+        sku: ingredient.sku,
+        name: item?.name || ingredient.name,
+        unit: item?.unit || ingredient.unit,
+        onHand,
+        need,
+        kind: "raw",
+        missing: !item,
+        short: !item || onHand === null || onHand < need,
+      });
+    }
+    const prev = cooked.get(recipe.finishedSku);
+    const item = items.find((row) => row.sku === recipe.finishedSku);
+    const need = round3((prev?.need ?? 0) + (open ? recipe.yieldQty * ticket.batches : 0));
+    cooked.set(recipe.finishedSku, {
+      sku: recipe.finishedSku,
+      name: item?.name || recipe.finishedName,
+      unit: item?.unit || "ea",
+      onHand: item ? item.onHand : null,
+      need,
+      kind: "cooked",
+      missing: !item,
+      short: false,
+    });
+  }
+  return { raw: [...raw.values()], cooked: [...cooked.values()] };
 }
 
 export async function claimTicket(ticketId: string, actor: string) {
@@ -419,12 +464,20 @@ function chicagoServiceDate(now: Date): string {
   }).format(now);
 }
 
-export async function inventoryViews() {
+export async function inventoryViews(now = new Date()) {
   const snapshot = await readInventory();
   const split = splitCatalog(snapshot.items);
   await ensureReady();
   const db = loadDb();
-  return { ...snapshot, ...split, recipes: db.recipes };
+  const today = db.tickets.filter((ticket) => ticket.serviceDate === chicagoServiceDate(now));
+  const todayIds = new Set(today.map((ticket) => ticket.recipeId));
+  return {
+    ...snapshot,
+    ...split,
+    recipes: db.recipes,
+    todayRecipes: db.recipes.filter((recipe) => todayIds.has(recipe.id)),
+    bakeDay: bakeDayStock(today, db.recipes, snapshot.items),
+  };
 }
 
 export { readTestCookCount } from "./square";

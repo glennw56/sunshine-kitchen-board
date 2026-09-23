@@ -6,13 +6,14 @@ import path from "node:path";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import { isOverdue, shouldSendAutoAlert, timingLabel } from "../lib/alerts";
-import { claimTicket, completeTicket, cookedMove, shortageLines, startTicket, stockDeltas } from "../lib/board";
+import { bakeDayStock, claimTicket, completeTicket, cookedMove, shortageLines, startTicket, stockDeltas } from "../lib/board";
 import { SQUARE_TEST_COOK } from "../lib/constants";
 import { applyDeltaToDocument, CatalogMissError, extractCatalogFromText } from "../lib/inventory/normalize";
 import { SEED_RECIPES } from "../lib/seed-data";
 import { assertSquareRequest, buildTestCookAdjustment } from "../lib/square";
 import { verifySlackSignature } from "../lib/slack";
 import { ensureReady, loadDb } from "../lib/store";
+import type { CatalogItem, Ticket } from "../lib/types";
 import { chicagoLocalToUtc } from "../lib/time";
 import { filterLive, parseTimeclockFlight, toLivePeople } from "../lib/timeclock/parse";
 
@@ -128,6 +129,40 @@ test("slack signature accepts a fresh valid header", () => {
   assert.equal(verifySlackSignature(raw, timestamp, "v0=nope"), false);
 });
 
+test("bake-day stock is today's recipe SKUs, with shared need and done tickets at zero", () => {
+  const items: CatalogItem[] = [
+    { sku: "FLOUR-AP", name: "Flour", onHand: 40, unit: "lb", category: "dry" },
+    { sku: "BUTTER-UNS", name: "Butter", onHand: 2, unit: "lb", category: "dairy" },
+    { sku: "CROISSANT", name: "Croissant", onHand: 0, unit: "ea", category: "finished" },
+    { sku: "COOKIE-CCC", name: "Cookie", onHand: 3, unit: "ea", category: "finished" },
+    { sku: "LOAF-SOUR", name: "Loaf", onHand: 1, unit: "ea", category: "cooked" },
+    { sku: "SALT-KOSHER", name: "Salt", onHand: 5, unit: "lb", category: "dry" },
+    { sku: "UNUSED", name: "Unused spice", onHand: 99, unit: "ea", category: "dry" },
+  ];
+  const tickets = [
+    stubTicket({ id: "a", recipeId: "croissant", status: "open", batches: 1 }),
+    stubTicket({ id: "b", recipeId: "cookie", status: "claimed", batches: 1 }),
+    stubTicket({ id: "c", recipeId: "sourdough", status: "done", batches: 1 }),
+  ];
+  const stock = bakeDayStock(tickets, SEED_RECIPES, items);
+  const flour = stock.raw.find((line) => line.sku === "FLOUR-AP");
+  assert.equal(flour?.need, 3.5);
+  assert.equal(flour?.onHand, 40);
+  assert.equal(flour?.short, false);
+  const butter = stock.raw.find((line) => line.sku === "BUTTER-UNS");
+  assert.equal(butter?.need, 9);
+  assert.equal(butter?.onHand, 2);
+  assert.equal(butter?.short, true);
+  assert.equal(stock.raw.find((line) => line.sku === "SALT-KOSHER")?.need, 0);
+  assert.equal(stock.cooked.find((line) => line.sku === "CROISSANT")?.need, 24);
+  assert.equal(stock.cooked.find((line) => line.sku === "COOKIE-CCC")?.onHand, 3);
+  assert.equal(stock.cooked.find((line) => line.sku === "LOAF-SOUR")?.need, 0);
+  assert.equal(stock.raw.some((line) => line.sku === "UNUSED"), false);
+  const missing = bakeDayStock([stubTicket({ id: "m", recipeId: "croissant", status: "open", batches: 1 })], SEED_RECIPES, []);
+  assert.equal(missing.raw.find((line) => line.sku === "FLOUR-AP")?.missing, true);
+  assert.equal(missing.cooked.find((line) => line.sku === "CROISSANT")?.missing, true);
+});
+
 test("claim, start, done moves raw down and cooked up", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-"));
   process.env.DATA_DIR = dir;
@@ -158,6 +193,23 @@ test("claim, start, done moves raw down and cooked up", async () => {
   await assert.rejects(() => cookedMove("NOT-A-SKU", 1, "add", "Alex"), CatalogMissError);
   await assert.rejects(() => cookedMove("FLOUR-AP", 1, "pull", "Alex"), /not a cooked/);
 });
+
+function stubTicket(partial: Pick<Ticket, "id" | "recipeId" | "status" | "batches">): Ticket {
+  return {
+    serviceDate: "2026-09-23",
+    dueAt: "2026-09-23T15:00:00.000Z",
+    assignee: null,
+    claimedAt: null,
+    startedAt: null,
+    doneAt: null,
+    shortageAck: false,
+    stockMoved: false,
+    squareMoved: false,
+    squareError: null,
+    createdAt: "2026-09-23T12:00:00.000Z",
+    ...partial,
+  };
+}
 
 test("deploy script refuses any other service name", () => {
   const script = path.join(process.cwd(), "scripts/deploy.sh");

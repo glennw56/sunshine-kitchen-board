@@ -101,6 +101,18 @@ export type CatalogItem = {
   qtyKey?: string;
 };
 
+export type BakeDayStockLine = {
+  sku: string;
+  name: string;
+  unit: string;
+  onHand: number | null;
+  /** Still needed for today's tickets that are not done. */
+  need: number;
+  kind: "raw" | "cooked";
+  missing: boolean;
+  short: boolean;
+};
+
 export type ShortageLine = {
   sku: string;
   name: string;

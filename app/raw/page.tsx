@@ -9,9 +9,9 @@ export default async function RawPage() {
   return (
     <Shell active="/raw">
       <RawClient
-        items={view.raw}
+        lines={view.bakeDay.raw}
         all={view.items}
-        recipes={view.recipes}
+        recipes={view.todayRecipes}
         error={view.error}
         transport={view.transport}
         health={view.health}

@@ -1,6 +1,6 @@
 # Sunshine kitchen board
 
-Phone-first bake-day board for Sunshine's Bakery. A recipe is a finished item, a batch, a due time, and the steps that get it there. Staff claim, start, and finish today's tickets. Finishing deducts raw ingredients and adds cooked goods in the same inventory the shop already trusts.
+Phone and tablet bake-day board for Sunshine's Bakery. A recipe is a finished item, a batch, a due time, and the steps that get it there. Staff claim, start, and finish today's tickets. Finishing deducts raw ingredients and adds cooked goods in the same inventory the shop already trusts. There is no second stock database.
 
 This repository deploys **only** the Cloud Run test service `sunshine-kitchen-board-test` in project `bakery-444323`, region `us-east1`. It does not promote anything to production.
 
@@ -8,14 +8,14 @@ This repository deploys **only** the Cloud Run test service `sunshine-kitchen-bo
 
 Four tabs, large tap targets, phone and tablet widths:
 
-1. **Board** — today's tickets sorted by due time. Claim, start, done. Shortage warning before start. Who is on what, early/late, Slack nudge.
-2. **Raw** — on-hand for raw catalog SKUs from sunshine-inventory-test, plus small kitchen adjustments. Link recipe lines to real SKUs. Full CSV and recounts stay in the inventory app.
-3. **Cooked** — add, remove, and pull finished goods. Only SKUs that already exist in the tax-exempt inventory catalog. Unknown SKUs are refused.
+1. **Board** — today's tickets sorted by due time. Claim, start, done. Shortage warning before start. Who is on what, early/late, Slack nudge. The same screen shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes and tickets. Layout is responsive for phone and tablet, not a phone-only view.
+2. **Raw** — on-hand and small kitchen adjustments for those same today's ingredients, read and written through sunshine-inventory-test. Link recipe lines to SKUs that already exist. Full CSV, recounts, and catalog browsing stay in the inventory app.
+3. **Cooked** — add, remove, and pull for today's finished SKUs that already exist in the tax-exempt inventory catalog. Unknown SKUs are refused.
 4. **Live** — read-only who's punched in and recent punches from the Sunshine time clock. Filter by store (Irondale by default) and keep the kitchen view on cooks. This app never clocks anyone in or out.
 
 Also in v1: Slack recipe read (`/recipe`), overdue sound on an open board, Slack auto-alert after a 10 minute buffer, re-alert every 15 minutes, and a Square inventory adjustment on the single item **Test Cook**.
 
-Not in v1: full ERP, auto-ordering, forecasts, Square cook predictions, multi-location inventory, clock-in on this app.
+Not in v1: full ERP, auto-ordering, Square cook predictions, demand forecasting, multi-location inventory, clock-in on this app.
 
 ## Local setup
 
@@ -133,7 +133,7 @@ Create a Slack app for the kitchen workspace:
 4. Install the app to the workspace. Put the bot in the kitchen channel.
 5. Set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_CHANNEL_ID`, and `PUBLIC_BASE_URL`.
 
-`/recipe` with no text lists today's tickets (ephemeral, so it does not post into a random channel). `/recipe croissant` (or cookie, sourdough, or part of the name) shows the batch, due time, ingredients, and ordered steps with minutes, station, and which step moves stock, plus a link to the ticket. Claim, start, and done stay on the phone board.
+`/recipe` with no text lists today's tickets (ephemeral, so it does not post into a random channel). `/recipe croissant` (or cookie, sourdough, or part of the name) shows the batch, due time, ingredients, and ordered steps with minutes, station, and which step moves stock, plus a link to the ticket. Claim, start, and done stay on the phone and tablet board.
 
 Overdue: a claimed or started ticket that is still open **10 minutes** after due posts once to `SLACK_CHANNEL_ID`, then again every **15 minutes** while it stays overdue. The manual **Slack nudge** button posts immediately and does not wait for the buffer. Constants live in `lib/constants.ts` and can be changed on the owner screen.
 
@@ -181,13 +181,13 @@ The Cloud Run service account needs `storage.objectAdmin` on the kitchen board b
 ## Smoke checklist
 
 1. Open the board. Three seeded tickets for today are listed by due time, with steps and stations.
-2. Raw tab shows on-hand. With `INVENTORY_TRANSPORT=http` and the inventory admin password, quantities match sunshine-inventory-test. Link any recipe line whose SKU is not in that catalog.
+2. The board shows raw on-hand and cooked/finished counts for SKUs on today's tickets. The Raw tab shows those same lines, not the full catalog. With `INVENTORY_TRANSPORT=http` and the inventory admin password, quantities match sunshine-inventory-test. Link any recipe line whose SKU is not in that catalog.
 3. Punch in a cook on the time clock (not on this board). Live tab, store Irondale, kitchen filter, shows that person. Confirm this app has no clock-in button.
 4. Enter a name, Claim → Start (acknowledge the butter shortage on croissants if you are on the file catalog) → Done. Raw on-hand drops. The finished SKU increases.
 5. Cooked tab: add, remove, and pull a finished catalog SKU. An unknown SKU is refused. Quantities match the inventory app afterward.
 6. Square item **Test Cook** (`HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5XQX`) changes by the same cooked amount. No other Square item changes. The app does not recreate the item.
 7. On the owner screen, set a claimed ticket to "Due 20 min ago". An open board beeps. Slack posts to the test channel (auto, or the Slack nudge button). A second auto post waits 15 minutes.
 8. In Slack, `/recipe` lists today and `/recipe croissant` shows ingredients and steps.
-9. Check the board on a phone width and a tablet width. The four tabs stay on screen and buttons are full tap height.
+9. Check the board on a phone and on a tablet. Stock chips and tickets reflow, the four tabs stay on screen, and buttons stay full tap height.
 
 Owner login for the activity log and alert settings is the email above plus the generated password.

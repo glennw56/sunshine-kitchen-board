@@ -16,7 +16,7 @@ export default async function CookedPage() {
   return (
     <Shell active="/cooked">
       <CookedClient
-        items={view.cooked}
+        lines={view.bakeDay.cooked}
         error={view.error}
         transport={view.transport}
         square={{ ...square, label: `${SQUARE_TEST_COOK.name} · ${SQUARE_TEST_COOK.sku}` }}

@@ -37,11 +37,22 @@ type Card = {
   alert: { lastError: string | null; count: number } | null;
 };
 
+type StockLine = {
+  sku: string;
+  name: string;
+  unit: string;
+  onHand: number | null;
+  need: number;
+  missing: boolean;
+  short: boolean;
+};
+
 type Snapshot = {
   cards: Card[];
   onTheFloor: { ticketId: string; recipe: string; assignee: string | null; status: string; timing: string }[];
   inventoryError: string | null;
   settings: { overdueBufferMinutes: number; realertMinutes: number };
+  bakeDay: { raw: StockLine[]; cooked: StockLine[] };
 };
 
 export function BoardClient({ initial }: { initial: Snapshot }) {
@@ -103,6 +114,13 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       {overdueCount > 0 ? (
         <div className="banner">{overdueCount} ticket{overdueCount === 1 ? "" : "s"} overdue. Sound is armed on this board.</div>
       ) : null}
+      <p className="meta">
+        On-hand for ingredients and finished items on today&apos;s tickets. The full catalog stays in sunshine-inventory-test.
+      </p>
+      <div className="stock-split" data-testid="bake-day-stock">
+        <StockStrip title="Raw on hand" lines={data.bakeDay.raw} />
+        <StockStrip title="Cooked on hand" lines={data.bakeDay.cooked} />
+      </div>
       <section className="card">
         <h2>Who&apos;s on what</h2>
         {floor.length === 0 ? <p className="meta">Nobody has a claimed ticket.</p> : null}
@@ -181,5 +199,26 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function StockStrip({ title, lines }: { title: string; lines: StockLine[] }) {
+  return (
+    <section className="card">
+      <h2>{title}</h2>
+      {lines.length === 0 ? <p className="meta">Nothing on today&apos;s tickets.</p> : null}
+      <div className="stock-grid">
+        {lines.map((line) => (
+          <div className={`stock-chip${line.short || line.missing ? " short" : ""}`} key={line.sku}>
+            <strong>{line.name}</strong>
+            <div className="qty">
+              {line.missing || line.onHand === null ? "—" : line.onHand}
+              <span className="unit">{line.unit}</span>
+            </div>
+            <div className="meta">{line.missing ? "not in catalog" : `need ${line.need} ${line.unit}`}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
