@@ -6,16 +6,21 @@ import { mentionFor, postKitchenMessage, recipeSlackText } from "./slack";
 import { adjustTestCook } from "./square";
 import { ensureReady, loadDb, logActivity, updateDb } from "./store";
 import type { BakeDayStockLine, CatalogItem, Recipe, ShortageLine, Ticket } from "./types";
-import { formatChicago } from "./time";
+import { addMinutes, formatChicago } from "./time";
 
 export async function boardSnapshot(now = new Date()) {
   await ensureReady();
   const db = loadDb();
   const inventory = await readInventory();
-  const today = db.tickets
-    .filter((ticket) => ticket.serviceDate === chicagoServiceDate(now))
-    .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
-  const cards = today.map((ticket) => decorate(ticket, db, inventory.items, now));
+  const today = db.tickets.filter((ticket) => ticket.serviceDate === chicagoServiceDate(now));
+  const cards = today
+    .map((ticket) => decorate(ticket, db, inventory.items, now))
+    .sort(
+      (a, b) =>
+        a.startAt.localeCompare(b.startAt) ||
+        a.ticket.dueAt.localeCompare(b.ticket.dueAt) ||
+        a.ticket.id.localeCompare(b.ticket.id),
+    );
   const active = cards.filter((card) => card.ticket.status === "claimed" || card.ticket.status === "started");
   return {
     now: now.toISOString(),
@@ -145,22 +150,23 @@ async function lockTicket<T>(ticketId: string, job: () => Promise<T>): Promise<T
   }
 }
 
-export async function completeTicket(ticketId: string, actor: string) {
-  return lockTicket(ticketId, () => completeTicketUnlocked(ticketId, actor));
+export async function completeTicket(ticketId: string, actor: string, qtyMade: number) {
+  return lockTicket(ticketId, () => completeTicketUnlocked(ticketId, actor, qtyMade));
 }
 
-async function completeTicketUnlocked(ticketId: string, actor: string) {
+async function completeTicketUnlocked(ticketId: string, actor: string, qtyMade: number) {
   await ensureReady();
   const db = loadDb();
   const ticket = mustTicket(db.tickets, ticketId);
   if (ticket.status === "done" && ticket.stockMoved) {
-    return { ok: true as const, already: true, squareError: ticket.squareError };
+    return { ok: true as const, already: true, squareError: ticket.squareError, qtyMade: ticket.qtyMade ?? null };
   }
   if (ticket.status !== "started") throw new Error("Start the ticket before marking it done");
   const recipe = mustRecipe(db.recipes, ticket.recipeId);
+  const qty = ticket.stockMoved && (ticket.qtyMade ?? 0) > 0 ? round3(ticket.qtyMade ?? 0) : requireQtyMade(qtyMade);
   const inventory = await readInventory();
   if (inventory.error) throw new Error(inventory.error);
-  const deltas = stockDeltas(recipe, ticket.batches);
+  const deltas = stockDeltas(recipe, ticket.batches, qty);
   assertKnown(deltas, inventory.items);
   assertCookedTarget(recipe.finishedSku, inventory.items, db.recipes);
   let applied: { sku: string; onHand: number }[] = [];
@@ -169,11 +175,12 @@ async function completeTicketUnlocked(ticketId: string, actor: string) {
   }
   const square = ticket.squareMoved
     ? { ok: true, skipped: false, error: null as string | null }
-    : await adjustTestCook(recipe.yieldQty * ticket.batches, {
+    : await adjustTestCook(qty, {
         idempotencyKey: `kb-${ticket.id}-done-${ticket.squareError ? "retry" : "1"}`,
       });
   await updateDb((next) => {
     const row = mustTicket(next.tickets, ticketId);
+    row.qtyMade = qty;
     row.stockMoved = true;
     row.squareMoved = square.ok && !square.skipped;
     row.squareError = square.ok ? null : square.error;
@@ -183,10 +190,10 @@ async function completeTicketUnlocked(ticketId: string, actor: string) {
       actor,
       action: "done",
       ticketId,
-      detail: `Finished. Stock moved. Square: ${square.ok ? "updated Test Cook" : square.error}`,
+      detail: `Finished ${qty}. Stock moved. Square: ${square.ok ? "updated Test Cook" : square.error}`,
     });
   });
-  return { ok: true as const, already: false, applied, squareError: square.ok ? null : square.error };
+  return { ok: true as const, already: false, applied, qtyMade: qty, squareError: square.ok ? null : square.error };
 }
 
 export async function retrySquare(ticketId: string, actor: string) {
@@ -196,7 +203,8 @@ export async function retrySquare(ticketId: string, actor: string) {
   const recipe = mustRecipe(db.recipes, ticket.recipeId);
   if (!ticket.stockMoved) throw new Error("Finish the ticket so inventory moves before retrying Square");
   if (ticket.squareMoved) return { ok: true as const, error: null };
-  const square = await adjustTestCook(recipe.yieldQty * ticket.batches, {
+  const qty = squareQty(ticket, recipe);
+  const square = await adjustTestCook(qty, {
     idempotencyKey: `kb-${ticket.id}-square-${randomBytes(3).toString("hex")}`,
   });
   await updateDb((next) => {
@@ -394,13 +402,26 @@ export function shortageLines(recipe: Recipe, batches: number, items: CatalogIte
   return lines;
 }
 
-export function stockDeltas(recipe: Recipe, batches: number): { sku: string; delta: number }[] {
+export function stockDeltas(recipe: Recipe, batches: number, qtyMade?: number): { sku: string; delta: number }[] {
   const deltas = recipe.ingredients.map((ingredient) => ({
     sku: ingredient.sku,
     delta: -round3(ingredient.qty * batches),
   }));
-  deltas.push({ sku: recipe.finishedSku, delta: round3(recipe.yieldQty * batches) });
+  const finished = qtyMade == null ? round3(recipe.yieldQty * batches) : round3(qtyMade);
+  deltas.push({ sku: recipe.finishedSku, delta: finished });
   return deltas;
+}
+
+/** When the task should be started: due time minus prep minutes. */
+export function plannedStartAt(dueAt: string, prepMinutes: number): string {
+  const minutes = Number.isFinite(prepMinutes) ? prepMinutes : 0;
+  return addMinutes(dueAt, -minutes).toISOString();
+}
+
+export function requireQtyMade(qtyMade: number): number {
+  const qty = round3(Number(qtyMade));
+  if (!Number.isFinite(qty) || qty <= 0) throw new Error("Amount made must be greater than zero");
+  return qty;
 }
 
 function decorate(
@@ -416,10 +437,16 @@ function decorate(
     ticket,
     recipe,
     shortages,
+    startAt: plannedStartAt(ticket.dueAt, recipe?.prepMinutes ?? 0),
     timing: timingLabel(ticket, db.settings, now),
     overdue: isOverdue(ticket, db.settings, now),
     alert,
   };
+}
+
+function squareQty(ticket: Ticket, recipe: Recipe): number {
+  if ((ticket.qtyMade ?? 0) > 0) return round3(ticket.qtyMade ?? 0);
+  return round3(recipe.yieldQty * ticket.batches);
 }
 
 function assertKnown(deltas: { sku: string }[], items: CatalogItem[]) {

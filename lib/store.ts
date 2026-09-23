@@ -87,6 +87,7 @@ function ensureTodayTickets() {
       doneAt: null,
       shortageAck: false,
       stockMoved: false,
+      qtyMade: null,
       squareMoved: false,
       squareError: null,
       createdAt: new Date().toISOString(),

@@ -8,7 +8,7 @@ This repository deploys **only** the Cloud Run test service `sunshine-kitchen-bo
 
 Four tabs. A phone keeps a bottom bar and a single column of tickets. A counter tablet (about 768px wide and tall enough to sit on the pass) gets its own frame: a side rail, larger type, and Claim / Start / Done as three equal glove-sized buttons. Phone landscape stays on the phone layout so a short screen is not a squeezed tablet.
 
-1. **Board** — today's tickets sorted by due time, with the due time set large enough to read at arm's length. Claim, start, done. Shortage warning before start. Who is on what, early/late, Slack nudge. The same screen shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes and tickets.
+1. **Board** — a day schedule headed **Today**, then cooks currently clocked in when the time clock answers, then a flat list ordered by start time (due minus prep). Each line is the start time and the task name. Tap a row to claim, start, or finish. Done asks how many were made; that amount is what gets added to the finished SKU and to Square Test Cook. Shortage warning before start. The same screen still shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes.
 2. **Raw** — on-hand and small kitchen adjustments for those same today's ingredients, read and written through sunshine-inventory-test. Link recipe lines to SKUs that already exist. Full CSV, recounts, and catalog browsing stay in the inventory app.
 3. **Cooked** — add, remove, and pull for today's finished SKUs that already exist in the tax-exempt inventory catalog. Unknown SKUs are refused.
 4. **Live** — read-only who's punched in and recent punches from the Sunshine time clock. Filter by store (Irondale by default) and keep the kitchen view on cooks. This app never clocks anyone in or out.
@@ -119,7 +119,7 @@ with `type: ADJUSTMENT` for variation `HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5X
 - Increase: `from_state NONE` → `to_state IN_STOCK`
 - Decrease (remove and pull): `from_state IN_STOCK` → `to_state WASTE`
 
-The Square client throws if a request path is anything except that batch-change or a count read of this variation, or if the body mentions another id or the Homebased location. It does not read Square sales, orders, or catalog, and it does not forecast demand. The current sellable/ecom flags are left as the owner created them.
+Done sends the cook's amount made (not the planned yield) as the Test Cook adjustment, and adds that same amount to the finished SKU. Raw ingredients still come out by the recipe batch. The Square client throws if a request path is anything except that batch-change or a count read of this variation, or if the body mentions another id or the Homebased location. It does not read Square sales, orders, or catalog, and it does not forecast demand. The current sellable/ecom flags are left as the owner created them.
 
 Set `SQUARE_ACCESS_TOKEN` to a token for that Square account. A missing token is reported on the ticket; inventory still moves so the catalog check can be verified separately. Use **Retry Square** on the card if inventory moved and Square did not.
 
@@ -180,14 +180,14 @@ The Cloud Run service account needs `storage.objectAdmin` on the kitchen board b
 
 ## Smoke checklist
 
-1. Open the board. Three seeded tickets for today are listed by due time, with steps and stations.
+1. Open the board. The heading is Today. Three seeded tasks are a flat list ordered by start time (time, then name). Tap a row for steps, claim, start, and done.
 2. The board shows raw on-hand and cooked/finished counts for SKUs on today's tickets. The Raw tab shows those same lines, not the full catalog. With `INVENTORY_TRANSPORT=http` and the inventory admin password, quantities match sunshine-inventory-test. Link any recipe line whose SKU is not in that catalog.
 3. Punch in a cook on the time clock (not on this board). Live tab, store Irondale, kitchen filter, shows that person. Confirm this app has no clock-in button.
-4. Enter a name, Claim → Start (acknowledge the butter shortage on croissants if you are on the file catalog) → Done. Raw on-hand drops. The finished SKU increases.
+4. Enter a name, open a row, Claim → Start (acknowledge the butter shortage on croissants if you are on the file catalog) → Done. Enter the amount made. Raw on-hand drops by the recipe batch. The finished SKU and Square Test Cook increase by the amount you entered.
 5. Cooked tab: add, remove, and pull a finished catalog SKU. An unknown SKU is refused. Quantities match the inventory app afterward.
 6. Square item **Test Cook** (`HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5XQX`) changes by the same cooked amount. No other Square item changes. The app does not recreate the item.
 7. On the owner screen, set a claimed ticket to "Due 20 min ago". An open board beeps. Slack posts to the test channel (auto, or the Slack nudge button). A second auto post waits 15 minutes.
 8. In Slack, `/recipe` lists today and `/recipe croissant` shows ingredients and steps.
-9. Phone width: bottom tabs, one column, Claim / Start / Done still full tap height (Done is the wide button). Tablet on the counter (portrait and landscape): side rail instead of the bottom bar, larger type, and three equal action buttons. Landscape shows two ticket columns. Read a due time from arm's length.
+9. Phone width: bottom tabs, one schedule column, rows and Claim / Start / Done at full tap height. Tablet on the counter (portrait and landscape): side rail instead of the bottom bar, larger type, and three equal action buttons inside an open row. Read a start time from arm's length.
 
 Owner login for the activity log and alert settings is the email above plus the generated password.

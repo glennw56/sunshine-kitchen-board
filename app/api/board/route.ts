@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       action?: string;
       ticketId?: string;
       ackShortage?: boolean;
+      qtyMade?: number;
     };
     const ticketId = body.ticketId || "";
     if (!ticketId) return fail("ticketId is required");
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
       return json(result);
     }
     if (body.action === "done") {
-      const result = await completeTicket(ticketId, gate.actor);
+      const result = await completeTicket(ticketId, gate.actor, Number(body.qtyMade));
       return json(result);
     }
     if (body.action === "nudge") {
