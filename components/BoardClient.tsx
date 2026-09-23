@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { formatDuration, runningElapsedMs } from "@/lib/time";
 import { OverdueSound } from "./OverdueSound";
 
 type Shortage = {
@@ -20,6 +21,9 @@ type Card = {
     dueAt: string;
     batches: number;
     qtyMade: number | null;
+    timerElapsedMs: number;
+    timerRunningSince: string | null;
+    startedAt: string | null;
     stockMoved: boolean;
     squareMoved: boolean;
     squareError: string | null;
@@ -34,10 +38,18 @@ type Card = {
     steps: { id: string; text: string; minutes: number; station: string | null; movesStock: boolean }[];
   } | null;
   shortages: Shortage[];
-  startAt: string;
+  column: "todo" | "progress" | "done";
+  estimateLabel: string;
   timing: string;
   overdue: boolean;
   alert: { lastError: string | null; count: number } | null;
+};
+
+type TemplateCard = {
+  recipeId: string;
+  name: string;
+  estimateLabel: string;
+  inSprint: boolean;
 };
 
 type StockLine = {
@@ -52,6 +64,9 @@ type StockLine = {
 
 type Snapshot = {
   cards: Card[];
+  sprint: { id: string; serviceDate: string; label: string };
+  backlog: TemplateCard[];
+  columns: { todo: Card[]; progress: Card[]; done: Card[] };
   inventoryError: string | null;
   settings: { overdueBufferMinutes: number; realertMinutes: number };
   bakeDay: { raw: StockLine[]; cooked: StockLine[] };
@@ -66,7 +81,9 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
   const [qtyPrompt, setQtyPrompt] = useState<string | null>(null);
   const [qty, setQty] = useState("");
   const [cooks, setCooks] = useState<string[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const overdueCount = data.cards.filter((card) => card.overdue).length;
+  const timing = data.columns.progress.some((card) => runningSince(card));
 
   async function reload() {
     const res = await fetch("/api/board", { cache: "no-store" });
@@ -81,6 +98,12 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
     void fetch("/api/alerts", { method: "POST" }).then(() => reload());
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!timing) return;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [timing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +123,7 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
   }, []);
 
   async function act(action: string, ticketId: string, extra: Record<string, unknown> = {}) {
-    setPending(`${action}:${ticketId}`);
+    setPending(`${action}:${ticketId || extra.recipeId || ""}`);
     setError(null);
     const res = await fetch("/api/board", {
       method: "POST",
@@ -112,14 +135,14 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
     if (!res.ok || body.ok === false) {
       if (body.shortages) {
         setConfirmId(ticketId);
-        setError("Short on ingredients. Start anyway only if the floor can cover it.");
+        setError("Short on ingredients. Move it anyway only if the floor can cover it.");
         return;
       }
-      setError(body.error || "Could not update the ticket");
+      setError(body.error || "Could not update the card");
       return;
     }
     setConfirmId(null);
-    if (action === "done") setQtyPrompt(null);
+    if (action === "move" && extra.column === "done") setQtyPrompt(null);
     if (body.squareError) setError(`Inventory moved. Square: ${body.squareError}`);
     await reload();
   }
@@ -137,13 +160,14 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       setError("Enter how many you made.");
       return;
     }
-    void act("done", ticketId, { qtyMade: amount });
+    void act("move", ticketId, { column: "done", qtyMade: amount });
   }
 
   return (
     <div className="board">
       <OverdueSound count={overdueCount} />
-      <h2 className="today-heading">Today</h2>
+      <h2 className="today-heading">Sprint</h2>
+      <p className="meta">{data.sprint.label}</p>
       {cooks.length > 0 ? (
         <div className="clocked-in" aria-label="Cooks clocked in">
           {cooks.map((name) => (
@@ -154,125 +178,94 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       {data.inventoryError ? <p className="error">{data.inventoryError}</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {overdueCount > 0 ? (
-        <div className="banner">{overdueCount} task{overdueCount === 1 ? "" : "s"} overdue.</div>
+        <div className="banner">{overdueCount} card{overdueCount === 1 ? "" : "s"} overdue.</div>
       ) : null}
-      <ul className="schedule" data-testid="day-schedule">
-        {data.cards.length === 0 ? <li className="meta schedule-empty">Nothing on today's board.</li> : null}
-        {data.cards.map((card) => {
-          const open = openId === card.ticket.id;
-          const name = card.recipe?.name ?? "Task";
-          const planned = card.recipe ? card.recipe.yieldQty * card.ticket.batches : null;
-          return (
-            <li key={card.ticket.id} id={card.ticket.id}>
+      <div className="jira" data-testid="sprint-board">
+        <section className="jira-col" aria-label="Backlog">
+          <header className="jira-head">
+            <h3>Backlog</h3>
+            <span className="badge">{data.backlog.length}</span>
+          </header>
+          {data.backlog.length === 0 ? <p className="meta">No templates yet.</p> : null}
+          {data.backlog.map((template) => (
+            <article className="issue" key={template.recipeId}>
+              <div className="issue-top">
+                <strong>{template.name}</strong>
+                <span className="estimate">{template.estimateLabel}</span>
+              </div>
               <button
+                className="btn"
                 type="button"
-                className={`schedule-row${open ? " open" : ""}${card.overdue ? " late" : ""}`}
-                aria-expanded={open}
-                onClick={() => setOpenId(open ? null : card.ticket.id)}
+                disabled={pending !== null || template.inSprint}
+                onClick={() => act("pull", "", { recipeId: template.recipeId })}
               >
-                <span className="due">{clockLabel(card.startAt)}</span>
-                <span className="schedule-name">{name}</span>
-                <span className={`badge ${card.overdue || card.timing === "late" ? "late" : ""}`}>{card.ticket.status}</span>
+                {template.inSprint ? "In sprint" : "Add to sprint"}
               </button>
-              {open ? (
-                <div className="schedule-detail">
-                  <p className="meta">
-                    Start {clockLabel(card.startAt)}
-                    {" · "}due {clockLabel(card.ticket.dueAt)}
-                    {card.recipe ? ` · ${card.recipe.batchSize} ${card.recipe.batchUnit}` : ""}
-                    {planned != null ? ` · plan ${planned}` : ""}
-                    {card.ticket.assignee ? ` · ${card.ticket.assignee}` : ""}
-                    {card.ticket.qtyMade != null ? ` · made ${card.ticket.qtyMade}` : ""}
-                  </p>
-                  {card.shortages.length > 0 && card.ticket.status !== "done" ? (
-                    <div className="banner">
-                      {card.shortages.map((line) => (
-                        <div key={line.sku}>
-                          {line.missingSku
-                            ? `${line.sku} is not in the inventory catalog`
-                            : `${line.name}: have ${line.onHand} ${line.unit}, need ${line.need}`}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {card.ticket.squareError ? <p className="error">Square: {card.ticket.squareError}</p> : null}
-                  {card.alert?.lastError ? <p className="error">Slack auto-alert: {card.alert.lastError}</p> : null}
-                  {qtyPrompt === card.ticket.id ? (
-                    <form
-                      className="qty-prompt"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        confirmDone(card.ticket.id);
-                      }}
-                    >
-                      <label htmlFor={`qty-${card.ticket.id}`}>
-                        Amount made
-                        {planned != null ? <span className="meta"> Plan was {planned}.</span> : null}
-                      </label>
-                      <input
-                        id={`qty-${card.ticket.id}`}
-                        aria-label="Amount made"
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={qty}
-                        placeholder="How many"
-                        onChange={(event) => setQty(event.target.value)}
-                        autoFocus
-                      />
-                      <div className="actions">
-                        <button className="btn secondary" type="button" disabled={pending !== null} onClick={() => setQtyPrompt(null)}>
-                          Back
-                        </button>
-                        <button className="btn done" type="submit" disabled={pending !== null}>
-                          Finish
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="actions">
-                      <button className="btn" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("claim", card.ticket.id)}>
-                        Claim
-                      </button>
-                      <button className="btn secondary" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("start", card.ticket.id, { ackShortage: confirmId === card.ticket.id })}>
-                        {confirmId === card.ticket.id ? "Start anyway" : "Start"}
-                      </button>
-                      <button className="btn done" disabled={pending !== null || card.ticket.status === "done"} onClick={() => askDone(card.ticket.id)}>
-                        Done
-                      </button>
-                    </div>
-                  )}
-                  <div className="row extra-actions">
-                    <button className="btn ghost" disabled={pending !== null} onClick={() => act("nudge", card.ticket.id)}>
-                      Slack nudge
-                    </button>
-                    {card.ticket.stockMoved && !card.ticket.squareMoved ? (
-                      <button className="btn ghost" disabled={pending !== null} onClick={() => act("square-retry", card.ticket.id)}>
-                        Retry Square
-                      </button>
-                    ) : null}
-                  </div>
-                  {card.recipe ? (
-                    <ol className="steps">
-                      {card.recipe.steps.map((step) => (
-                        <li key={step.id}>
-                          {step.text} · {step.minutes} min
-                          {step.station ? ` · ${step.station}` : ""}
-                          {step.movesStock ? " · moves stock" : ""}
-                        </li>
-                      ))}
-                    </ol>
-                  ) : null}
+            </article>
+          ))}
+        </section>
+        <SprintColumn title="To Do" cards={data.columns.todo} openId={openId} setOpenId={setOpenId} pending={pending} onNudge={(id) => act("nudge", id)} onRetry={(id) => act("square-retry", id)}>
+          {(card) => (
+            <button
+              className="btn"
+              type="button"
+              disabled={pending !== null}
+              onClick={() => act("move", card.ticket.id, { column: "progress", ackShortage: confirmId === card.ticket.id })}
+            >
+              {confirmId === card.ticket.id ? "Start anyway" : "In Progress"}
+            </button>
+          )}
+        </SprintColumn>
+        <SprintColumn title="In Progress" cards={data.columns.progress} nowMs={nowMs} openId={openId} setOpenId={setOpenId} pending={pending} onNudge={(id) => act("nudge", id)} onRetry={(id) => act("square-retry", id)}>
+          {(card) =>
+            qtyPrompt === card.ticket.id ? (
+              <form
+                className="qty-prompt"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  confirmDone(card.ticket.id);
+                }}
+              >
+                <label htmlFor={`qty-${card.ticket.id}`}>
+                  Amount made
+                  {card.recipe ? <span className="meta"> Plan was {card.recipe.yieldQty * card.ticket.batches}.</span> : null}
+                </label>
+                <input
+                  id={`qty-${card.ticket.id}`}
+                  aria-label="Amount made"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  value={qty}
+                  placeholder="How many"
+                  onChange={(event) => setQty(event.target.value)}
+                  autoFocus
+                />
+                <div className="actions">
+                  <button className="btn secondary" type="button" disabled={pending !== null} onClick={() => setQtyPrompt(null)}>
+                    Back
+                  </button>
+                  <button className="btn done" type="submit" disabled={pending !== null}>
+                    Finish
+                  </button>
                 </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-      <p className="meta board-stock-note">
-        On-hand for ingredients and finished items on today&apos;s tasks.
-      </p>
+              </form>
+            ) : (
+              <div className="actions">
+                <button className="btn secondary" type="button" disabled={pending !== null} onClick={() => act("move", card.ticket.id, { column: "todo" })}>
+                  To Do
+                </button>
+                <button className="btn done" type="button" disabled={pending !== null} onClick={() => askDone(card.ticket.id)}>
+                  Done
+                </button>
+              </div>
+            )
+          }
+        </SprintColumn>
+        <SprintColumn title="Done" cards={data.columns.done} nowMs={nowMs} openId={openId} setOpenId={setOpenId} pending={pending} onNudge={(id) => act("nudge", id)} onRetry={(id) => act("square-retry", id)} />
+      </div>
+      <p className="meta board-stock-note">On-hand for ingredients and finished items on today&apos;s sprint.</p>
       <div className="stock-split board-stock" data-testid="bake-day-stock">
         <StockStrip title="Raw on hand" lines={data.bakeDay.raw} />
         <StockStrip title="Cooked on hand" lines={data.bakeDay.cooked} />
@@ -281,19 +274,117 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
   );
 }
 
-function clockLabel(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-US", {
-    timeZone: "America/Chicago",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+function SprintColumn({
+  title,
+  cards,
+  nowMs,
+  openId,
+  setOpenId,
+  pending,
+  onNudge,
+  onRetry,
+  children,
+}: {
+  title: string;
+  cards: Card[];
+  nowMs?: number;
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+  pending: string | null;
+  onNudge: (id: string) => void;
+  onRetry: (id: string) => void;
+  children?: (card: Card) => ReactNode;
+}) {
+  return (
+    <section className="jira-col" aria-label={title}>
+      <header className="jira-head">
+        <h3>{title}</h3>
+        <span className="badge">{cards.length}</span>
+      </header>
+      {cards.length === 0 ? <p className="meta">Nothing here.</p> : null}
+      {cards.map((card) => (
+        <article className={`issue${card.overdue ? " late" : ""}`} key={card.ticket.id} id={card.ticket.id}>
+          <div className="issue-top">
+            <strong>{card.recipe?.name ?? "Task"}</strong>
+            <span className="estimate">{card.estimateLabel}</span>
+          </div>
+          <Timer card={card} nowMs={nowMs ?? Date.now()} />
+          <button className="text-btn" type="button" onClick={() => setOpenId(openId === card.ticket.id ? null : card.ticket.id)}>
+            {openId === card.ticket.id ? "Hide steps" : "Steps"}
+          </button>
+          {openId === card.ticket.id ? (
+            <div>
+              {card.recipe ? (
+                <ol className="steps">
+                  {card.recipe.steps.map((step) => (
+                    <li key={step.id}>
+                      {step.text} · {step.minutes} min
+                      {step.station ? ` · ${step.station}` : ""}
+                      {step.movesStock ? " · moves stock" : ""}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+              {card.alert?.lastError ? <p className="error">Slack auto-alert: {card.alert.lastError}</p> : null}
+              <div className="row extra-actions">
+                <button className="btn ghost" type="button" disabled={pending !== null} onClick={() => onNudge(card.ticket.id)}>
+                  Slack nudge
+                </button>
+                {card.ticket.stockMoved && !card.ticket.squareMoved ? (
+                  <button className="btn ghost" type="button" disabled={pending !== null} onClick={() => onRetry(card.ticket.id)}>
+                    Retry Square
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <p className="meta issue-meta">
+            {card.ticket.assignee ? card.ticket.assignee : "Unassigned"}
+            {card.ticket.qtyMade != null ? ` · made ${card.ticket.qtyMade}` : ""}
+            {card.overdue ? " · late" : ""}
+          </p>
+          {card.shortages.length > 0 && card.column !== "done" ? (
+            <div className="banner">
+              {card.shortages.map((line) => (
+                <div key={line.sku}>
+                  {line.missingSku
+                    ? `${line.sku} is not in the inventory catalog`
+                    : `${line.name}: have ${line.onHand} ${line.unit}, need ${line.need}`}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {card.ticket.squareError ? <p className="error">Square: {card.ticket.squareError}</p> : null}
+          {children ? children(card) : null}
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function Timer({ card, nowMs }: { card: Card; nowMs: number }) {
+  const since = runningSince(card);
+  const elapsed = runningElapsedMs(card.ticket.timerElapsedMs ?? 0, since, nowMs);
+  if (!since && elapsed <= 0) return null;
+  const stopped = card.column === "done";
+  return (
+    <p className={`timer${since ? " live" : ""}`} aria-label={since ? "Timer running" : stopped ? "Timer stopped" : "Timer paused"}>
+      {formatDuration(elapsed)}
+      {since || stopped ? "" : " paused"}
+    </p>
+  );
+}
+
+function runningSince(card: Card): string | null {
+  if (card.column !== "progress") return null;
+  return card.ticket.timerRunningSince || card.ticket.startedAt;
 }
 
 function StockStrip({ title, lines }: { title: string; lines: StockLine[] }) {
   return (
     <section className="card">
       <h2>{title}</h2>
-      {lines.length === 0 ? <p className="meta">Nothing on today&apos;s tickets.</p> : null}
+      {lines.length === 0 ? <p className="meta">Nothing on today&apos;s sprint.</p> : null}
       <div className="stock-grid">
         {lines.map((line) => (
           <div className={`stock-chip${line.short || line.missing ? " short" : ""}`} key={line.sku}>

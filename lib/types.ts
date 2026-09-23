@@ -27,7 +27,10 @@ export type Recipe = {
   batchSize: number;
   batchUnit: string;
   prepMinutes: number;
-  /** America/Chicago HH:mm used when seeding today's ticket. */
+  /** Labor estimate in hours and minutes. */
+  estimateHours: number;
+  estimateMinutes: number;
+  /** America/Chicago HH:mm used when a template is pulled into a sprint. */
   defaultDueTime: string;
   ingredients: RecipeIngredient[];
   steps: RecipeStep[];
@@ -48,6 +51,10 @@ export type Ticket = {
   claimedAt: string | null;
   startedAt: string | null;
   doneAt: string | null;
+  /** Frozen time from earlier In Progress stays. */
+  timerElapsedMs: number;
+  /** Set only while the card is In Progress. */
+  timerRunningSince: string | null;
   shortageAck: boolean;
   stockMoved: boolean;
   /** Finished units the cook entered on Done. Drives cooked stock and Square. */
@@ -70,7 +77,9 @@ export type ActivityAction =
   | "cooked-pull"
   | "link-sku"
   | "due-change"
-  | "square-retry";
+  | "square-retry"
+  | "pull"
+  | "move";
 
 export type ActivityEntry = {
   id: string;

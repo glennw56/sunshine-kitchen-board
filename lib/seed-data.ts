@@ -11,6 +11,8 @@ export const SEED_RECIPES: Recipe[] = [
     batchSize: 24,
     batchUnit: "pastries",
     prepMinutes: 90,
+    estimateHours: 1,
+    estimateMinutes: 30,
     defaultDueTime: "10:00",
     ingredients: [
       { id: "cr-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 2, unit: "lb" },
@@ -34,6 +36,8 @@ export const SEED_RECIPES: Recipe[] = [
     batchSize: 4,
     batchUnit: "dozen",
     prepMinutes: 35,
+    estimateHours: 0,
+    estimateMinutes: 35,
     defaultDueTime: "14:00",
     ingredients: [
       { id: "ck-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 1.5, unit: "lb" },
@@ -57,6 +61,8 @@ export const SEED_RECIPES: Recipe[] = [
     batchSize: 8,
     batchUnit: "loaves",
     prepMinutes: 70,
+    estimateHours: 1,
+    estimateMinutes: 10,
     defaultDueTime: "06:30",
     ingredients: [
       { id: "sd-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 6, unit: "lb" },

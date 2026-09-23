@@ -83,3 +83,60 @@ function chicagoParts(date: Date) {
 export function addMinutes(iso: string, minutes: number): Date {
   return new Date(new Date(iso).getTime() + minutes * 60_000);
 }
+
+export function formatSprintLabel(serviceDate: string): string {
+  const noon = chicagoLocalToUtc(serviceDate, "12:00");
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(noon);
+}
+
+export function formatEstimate(hours: number, minutes: number): string {
+  const h = Math.max(0, Math.floor(hours));
+  const m = Math.max(0, Math.floor(minutes));
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const clock = `${m}:${String(s).padStart(2, "0")}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : clock;
+}
+
+export function runningElapsedMs(elapsedMs: number, runningSince: string | null, nowMs: number): number {
+  const base = Number.isFinite(elapsedMs) ? elapsedMs : 0;
+  if (!runningSince) return base;
+  const since = new Date(runningSince).getTime();
+  if (!Number.isFinite(since)) return base;
+  return base + Math.max(0, nowMs - since);
+}
+
+export function pauseTimer(
+  ticket: { timerElapsedMs?: number; timerRunningSince?: string | null },
+  now = new Date(),
+) {
+  const since = ticket.timerRunningSince;
+  if (!since) {
+    ticket.timerElapsedMs = ticket.timerElapsedMs ?? 0;
+    return;
+  }
+  ticket.timerElapsedMs = runningElapsedMs(ticket.timerElapsedMs ?? 0, since, now.getTime());
+  ticket.timerRunningSince = null;
+}
+
+export function resumeTimer(
+  ticket: { timerElapsedMs?: number; timerRunningSince?: string | null; startedAt?: string | null },
+  now = new Date(),
+) {
+  ticket.timerElapsedMs = ticket.timerElapsedMs ?? 0;
+  if (!ticket.timerRunningSince) ticket.timerRunningSince = now.toISOString();
+  if (ticket.startedAt == null) ticket.startedAt = ticket.timerRunningSince;
+}

@@ -4,9 +4,9 @@ import { CatalogMissError, isCookedCategory } from "./inventory/normalize";
 import { isOverdue, shouldSendAutoAlert, timingLabel } from "./alerts";
 import { mentionFor, postKitchenMessage, recipeSlackText } from "./slack";
 import { adjustTestCook } from "./square";
-import { ensureReady, loadDb, logActivity, updateDb } from "./store";
-import type { BakeDayStockLine, CatalogItem, Recipe, ShortageLine, Ticket } from "./types";
-import { addMinutes, formatChicago } from "./time";
+import { ensureReady, loadDb, logActivity, newOpenTicket, updateDb } from "./store";
+import type { BakeDayStockLine, CatalogItem, Recipe, ShortageLine, Ticket, TicketStatus } from "./types";
+import { addMinutes, formatChicago, formatEstimate, formatSprintLabel, pauseTimer, resumeTimer } from "./time";
 
 export async function boardSnapshot(now = new Date()) {
   await ensureReady();
@@ -21,10 +21,26 @@ export async function boardSnapshot(now = new Date()) {
         a.ticket.dueAt.localeCompare(b.ticket.dueAt) ||
         a.ticket.id.localeCompare(b.ticket.id),
     );
+  const serviceDate = chicagoServiceDate(now);
   const active = cards.filter((card) => card.ticket.status === "claimed" || card.ticket.status === "started");
+  const inSprint = new Set(
+    today.filter((ticket) => ticket.status !== "done").map((ticket) => ticket.recipeId),
+  );
   return {
     now: now.toISOString(),
     settings: db.settings,
+    sprint: { id: serviceDate, serviceDate, label: formatSprintLabel(serviceDate) },
+    backlog: db.recipes.map((recipe) => ({
+      recipeId: recipe.id,
+      name: recipe.name,
+      estimateLabel: estimateLabel(recipe),
+      inSprint: inSprint.has(recipe.id),
+    })),
+    columns: {
+      todo: cards.filter((card) => columnFor(card.ticket.status) === "todo"),
+      progress: cards.filter((card) => columnFor(card.ticket.status) === "progress"),
+      done: cards.filter((card) => columnFor(card.ticket.status) === "done"),
+    },
     cards,
     onTheFloor: active.map((card) => ({
       ticketId: card.ticket.id,
@@ -125,6 +141,10 @@ export async function startTicket(ticketId: string, actor: string, ackShortage: 
     const row = mustTicket(next.tickets, ticketId);
     row.status = "started";
     row.startedAt = row.startedAt ?? new Date().toISOString();
+    if (row.status === "started" && !row.timerRunningSince && row.startedAt) {
+      row.timerRunningSince = row.startedAt;
+    }
+    resumeTimer(row);
     row.shortageAck = shortages.length ? true : row.shortageAck;
     logActivity(next, {
       actor,
@@ -180,6 +200,10 @@ async function completeTicketUnlocked(ticketId: string, actor: string, qtyMade: 
       });
   await updateDb((next) => {
     const row = mustTicket(next.tickets, ticketId);
+    if (row.status === "started" && !row.timerRunningSince && row.startedAt) {
+      row.timerRunningSince = row.startedAt;
+    }
+    pauseTimer(row);
     row.qtyMade = qty;
     row.stockMoved = true;
     row.squareMoved = square.ok && !square.skipped;
@@ -219,6 +243,94 @@ export async function retrySquare(ticketId: string, actor: string) {
     });
   });
   return { ok: square.ok, error: square.error };
+}
+
+export async function pullTemplate(recipeId: string, actor: string, now = new Date()) {
+  await ensureReady();
+  const serviceDate = chicagoServiceDate(now);
+  await updateDb((db) => {
+    const recipe = mustRecipe(db.recipes, recipeId);
+    const active = db.tickets.find(
+      (ticket) => ticket.recipeId === recipeId && ticket.serviceDate === serviceDate && ticket.status !== "done",
+    );
+    if (active) throw new Error("That template is already in today's sprint");
+    const ticket = newOpenTicket(recipe, serviceDate);
+    db.tickets.push(ticket);
+    logActivity(db, {
+      actor,
+      action: "pull",
+      ticketId: ticket.id,
+      detail: `Pulled ${recipe.name} into the ${serviceDate} sprint`,
+    });
+  });
+  return { ok: true as const };
+}
+
+export async function moveTicket(
+  ticketId: string,
+  column: "todo" | "progress" | "done",
+  actor: string,
+  opts: { ackShortage?: boolean; qtyMade?: number } = {},
+) {
+  if (column === "done") return completeTicket(ticketId, actor, Number(opts.qtyMade));
+  if (column === "progress") return moveToProgress(ticketId, actor, Boolean(opts.ackShortage));
+  return moveToTodo(ticketId, actor);
+}
+
+async function moveToProgress(ticketId: string, actor: string, ackShortage: boolean) {
+  await ensureReady();
+  const db = loadDb();
+  const ticket = mustTicket(db.tickets, ticketId);
+  if (ticket.status === "done") throw new Error("That card is already done");
+  if (ticket.status === "started" && ticket.assignee && ticket.assignee !== actor) {
+    throw new Error(`${ticket.assignee} already has this in progress`);
+  }
+  const recipe = mustRecipe(db.recipes, ticket.recipeId);
+  const inventory = await readInventory();
+  if (inventory.error) throw new Error(inventory.error);
+  const shortages = shortageLines(recipe, ticket.batches, inventory.items);
+  if (shortages.length && !ackShortage && !ticket.shortageAck) {
+    return { ok: false as const, shortages };
+  }
+  await updateDb((next) => {
+    const row = mustTicket(next.tickets, ticketId);
+    row.assignee = row.assignee || actor;
+    row.claimedAt = row.claimedAt ?? new Date().toISOString();
+    row.status = "started";
+    row.shortageAck = shortages.length ? true : row.shortageAck;
+    if (!row.timerRunningSince && row.startedAt && row.timerElapsedMs == null) {
+      row.timerRunningSince = row.startedAt;
+    }
+    resumeTimer(row);
+    logActivity(next, {
+      actor,
+      action: "start",
+      ticketId,
+      detail: shortages.length
+        ? `Moved to In Progress with shortages: ${shortages.map((line) => line.sku).join(", ")}`
+        : "Moved to In Progress",
+    });
+  });
+  return { ok: true as const, shortages };
+}
+
+async function moveToTodo(ticketId: string, actor: string) {
+  await updateDb((db) => {
+    const row = mustTicket(db.tickets, ticketId);
+    if (row.status === "done" && row.stockMoved) throw new Error("Finished cards stay in Done");
+    if (row.status === "started" && !row.timerRunningSince && row.startedAt) {
+      row.timerRunningSince = row.startedAt;
+    }
+    pauseTimer(row);
+    row.status = row.assignee ? "claimed" : "open";
+    logActivity(db, {
+      actor,
+      action: "move",
+      ticketId,
+      detail: "Moved back to To Do. Timer paused.",
+    });
+  });
+  return { ok: true as const };
 }
 
 export async function nudgeTicket(ticketId: string, actor: string) {
@@ -433,15 +545,37 @@ function decorate(
   const recipe = db.recipes.find((item) => item.id === ticket.recipeId) ?? null;
   const shortages = recipe ? shortageLines(recipe, ticket.batches, items) : [];
   const alert = db.alerts.find((row) => row.ticketId === ticket.id) ?? null;
+  const estimate = recipe ? recipeEstimate(recipe) : { hours: 0, minutes: 0 };
   return {
     ticket,
     recipe,
     shortages,
+    column: columnFor(ticket.status),
+    estimateLabel: recipe ? formatEstimate(estimate.hours, estimate.minutes) : "",
     startAt: plannedStartAt(ticket.dueAt, recipe?.prepMinutes ?? 0),
     timing: timingLabel(ticket, db.settings, now),
     overdue: isOverdue(ticket, db.settings, now),
     alert,
   };
+}
+
+export function columnFor(status: TicketStatus): "todo" | "progress" | "done" {
+  if (status === "done") return "done";
+  if (status === "started") return "progress";
+  return "todo";
+}
+
+export function recipeEstimate(recipe: { estimateHours?: number; estimateMinutes?: number; prepMinutes: number }) {
+  if (recipe.estimateHours != null && recipe.estimateMinutes != null) {
+    return { hours: recipe.estimateHours, minutes: recipe.estimateMinutes };
+  }
+  const total = Math.max(0, Math.round(recipe.prepMinutes || 0));
+  return { hours: Math.floor(total / 60), minutes: total % 60 };
+}
+
+export function estimateLabel(recipe: { estimateHours?: number; estimateMinutes?: number; prepMinutes: number }) {
+  const estimate = recipeEstimate(recipe);
+  return formatEstimate(estimate.hours, estimate.minutes);
 }
 
 function squareQty(ticket: Ticket, recipe: Recipe): number {

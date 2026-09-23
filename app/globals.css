@@ -158,6 +158,72 @@ input, select, .namebar input, .field input, .field select, .search {
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--line);
 }
+.jira {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(86vw, 1fr);
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 0.35rem;
+}
+.jira-col {
+  scroll-snap-align: start;
+  background: rgba(114, 36, 58, 0.06);
+  border-radius: 1.1rem;
+  padding: 0.7rem;
+  min-height: 14rem;
+}
+.jira-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.jira-head h3 { margin: 0; font-size: 1.25rem; }
+.issue {
+  background: white;
+  border-radius: 1rem;
+  padding: 0.85rem;
+  margin: 0 0 0.65rem;
+  box-shadow: var(--shadow);
+}
+.issue .btn { width: 100%; }
+.issue .actions {
+  grid-template-columns: 1fr;
+}
+.issue .actions .done { grid-column: auto; }
+.issue.late { box-shadow: inset 4px 0 0 var(--late), var(--shadow); }
+.issue-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.issue-top strong { font-size: 1.2rem; line-height: 1.2; }
+.estimate {
+  font-weight: 800;
+  color: var(--wine);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.timer {
+  margin: 0.35rem 0 0;
+  font-weight: 800;
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+}
+.timer.live { color: var(--wine); }
+.issue-meta { margin-bottom: 0.45rem; }
+.text-btn {
+  background: none;
+  border: 0;
+  color: var(--wine);
+  font-weight: 800;
+  min-height: 2.6rem;
+  padding: 0.15rem 0;
+}
 .today-heading {
   margin: 0.1rem 0 0.45rem;
   font-size: 2.1rem;
@@ -309,8 +375,18 @@ input, select, .namebar input, .field input, .field select, .search {
   .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
   .actions .done { grid-column: auto; }
   .list-item { padding: 1rem 0; }
+  .jira {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-columns: auto;
+    overflow: visible;
+    scroll-snap-type: none;
+  }
+  .issue-top strong { font-size: 1.35rem; }
+  .timer { font-size: 1.85rem; }
 }
 
 @media (min-width: 1100px) and (min-height: 640px) {
   .cards { grid-template-columns: 1fr 1fr; }
+  .jira { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

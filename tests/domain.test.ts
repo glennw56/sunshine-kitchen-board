@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import { isOverdue, shouldSendAutoAlert, timingLabel } from "../lib/alerts";
-import { bakeDayStock, boardSnapshot, claimTicket, completeTicket, cookedMove, plannedStartAt, retrySquare, shortageLines, startTicket, stockDeltas } from "../lib/board";
+import { bakeDayStock, boardSnapshot, claimTicket, completeTicket, cookedMove, moveTicket, plannedStartAt, pullTemplate, retrySquare, shortageLines, startTicket, stockDeltas } from "../lib/board";
 import { SQUARE_TEST_COOK } from "../lib/constants";
 import { applyDeltaToDocument, CatalogMissError, extractCatalogFromText } from "../lib/inventory/normalize";
 import { SEED_RECIPES } from "../lib/seed-data";
@@ -14,7 +14,7 @@ import { assertSquareRequest, buildTestCookAdjustment } from "../lib/square";
 import { verifySlackSignature } from "../lib/slack";
 import { ensureReady, loadDb } from "../lib/store";
 import type { CatalogItem, Ticket } from "../lib/types";
-import { chicagoLocalToUtc } from "../lib/time";
+import { chicagoLocalToUtc, formatEstimate, pauseTimer, resumeTimer, runningElapsedMs } from "../lib/time";
 import { filterLive, parseTimeclockFlight, toLivePeople } from "../lib/timeclock/parse";
 
 test("Chicago 10:00 in September is 15:00 UTC", () => {
@@ -100,6 +100,8 @@ test("overdue buffer and re-alert interval", () => {
     claimedAt: dueAt,
     startedAt: null,
     doneAt: null,
+    timerElapsedMs: 0,
+    timerRunningSince: null,
     shortageAck: false,
     stockMoved: false,
     qtyMade: null,
@@ -187,6 +189,7 @@ test("claim, start, done moves raw down and cooked up", async () => {
   process.env.ADMIN_INITIAL_PASSWORD = "test-password-please";
   process.env.AUTH_SECRET = "test-secret-at-least-16";
   await ensureReady();
+  await pullTemplate("croissant", "Alex");
   const ticket = loadDb().tickets.find((row) => row.recipeId === "croissant");
   assert.ok(ticket);
   const recipe = SEED_RECIPES[0];
@@ -270,6 +273,8 @@ function stubTicket(partial: Pick<Ticket, "id" | "recipeId" | "status" | "batche
     claimedAt: null,
     startedAt: null,
     doneAt: null,
+    timerElapsedMs: 0,
+    timerRunningSince: null,
     shortageAck: false,
     stockMoved: false,
     qtyMade: null,
@@ -286,32 +291,57 @@ test("tablet is its own floor layout, not a stretched phone", () => {
   assert.match(css, /min-width:\s*768px\) and \(min-height:\s*640px\)/);
   assert.match(css, /grid-template-columns:\s*11\.5rem/);
   assert.match(css, /--tap:\s*3\.5rem/);
-  assert.match(css, /\.schedule-row/);
-  assert.match(board, /Today/);
-  assert.match(board, /schedule-row/);
+  assert.match(css, /\.jira/);
+  assert.match(board, /Backlog/);
+  assert.match(board, /In Progress/);
   assert.match(board, /Amount made/);
+  assert.match(board, /className="estimate"/);
   assert.match(board, /className="actions"/);
-  assert.match(board, /className="due"/);
   assert.match(board, /className="btn done"/);
 });
 
-test("day board orders tasks by start time", async () => {
+test("sprint keeps templates and starts the timer only in progress", async () => {
+  assert.equal(formatEstimate(1, 30), "1h 30m");
+  assert.equal(formatEstimate(0, 35), "35m");
   assert.equal(plannedStartAt("2026-09-23T15:00:00.000Z", 90), "2026-09-23T13:30:00.000Z");
-  assert.equal(plannedStartAt("2026-09-23T11:30:00.000Z", 70), "2026-09-23T10:20:00.000Z");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-sort-"));
+  const running = stubTicket({ id: "timer", recipeId: "cookie", status: "started", batches: 1 });
+  running.timerElapsedMs = 1000;
+  running.timerRunningSince = "2026-09-23T15:00:00.000Z";
+  assert.equal(runningElapsedMs(running.timerElapsedMs, running.timerRunningSince, Date.parse("2026-09-23T15:00:05.000Z")), 6000);
+  pauseTimer(running, new Date("2026-09-23T15:00:05.000Z"));
+  assert.equal(running.timerRunningSince, null);
+  assert.equal(running.timerElapsedMs, 6000);
+  resumeTimer(running, new Date("2026-09-23T15:01:00.000Z"));
+  assert.equal(runningElapsedMs(running.timerElapsedMs, running.timerRunningSince, Date.parse("2026-09-23T15:01:02.000Z")), 8000);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-sprint-"));
   process.env.DATA_DIR = dir;
   process.env.INVENTORY_TRANSPORT = "file";
   process.env.ADMIN_INITIAL_PASSWORD = "test-password-please";
   process.env.AUTH_SECRET = "test-secret-at-least-16";
   const snap = await boardSnapshot();
-  const starts = snap.cards.map((card) => card.startAt);
-  assert.deepEqual(starts, [...starts].sort((a, b) => a.localeCompare(b)));
-  const sour = snap.cards.find((card) => card.ticket.recipeId === "sourdough");
-  const cross = snap.cards.find((card) => card.ticket.recipeId === "croissant");
-  const cookie = snap.cards.find((card) => card.ticket.recipeId === "cookie");
-  assert.ok(sour && cross && cookie);
-  assert.ok(sour.startAt < cross.startAt && cross.startAt < cookie.startAt);
-  assert.equal(cross.startAt, plannedStartAt(cross.ticket.dueAt, cross.recipe?.prepMinutes ?? 0));
+  assert.equal(snap.columns.todo.length, 1);
+  assert.equal(snap.columns.todo[0]?.ticket.recipeId, "cookie");
+  assert.equal(snap.columns.progress.length, 0);
+  assert.equal(snap.backlog.find((row) => row.recipeId === "croissant")?.inSprint, false);
+  assert.equal(snap.backlog.find((row) => row.recipeId === "cookie")?.inSprint, true);
+  assert.equal(snap.backlog.find((row) => row.recipeId === "croissant")?.estimateLabel, "1h 30m");
+  await pullTemplate("croissant", "Alex");
+  await assert.rejects(() => pullTemplate("croissant", "Alex"), /already in today's sprint/);
+  const pulled = loadDb().tickets.find((row) => row.recipeId === "croissant");
+  assert.ok(pulled);
+  assert.equal(loadDb().tickets.length, 2);
+  const started = await moveTicket(pulled.id, "progress", "Alex", { ackShortage: true });
+  assert.equal(started.ok, true);
+  const inProgress = loadDb().tickets.find((row) => row.id === pulled.id);
+  assert.equal(inProgress?.status, "started");
+  assert.ok(inProgress?.timerRunningSince);
+  await moveTicket(pulled.id, "todo", "Alex");
+  const paused = loadDb().tickets.find((row) => row.id === pulled.id);
+  assert.equal(paused?.status, "claimed");
+  assert.equal(paused?.timerRunningSince, null);
+  await boardSnapshot();
+  assert.equal(loadDb().tickets.length, 2);
 });
 
 test("deploy script refuses any other service name", () => {
@@ -323,5 +353,9 @@ test("deploy script refuses any other service name", () => {
   assert.match(text, /sunshine-kitchen-board-test/);
   assert.match(text, /bakery-444323/);
   assert.match(text, /us-east1/);
+  assert.match(text, /INVENTORY_TRANSPORT=gcs/);
+  assert.match(text, /bakery-444323-sunshine-inventory-test/);
+  assert.match(text, /catalog\.json/);
+  assert.doesNotMatch(text, /"INVENTORY_TRANSPORT": "http"/);
   assert.doesNotMatch(text, /gcloud run deploy "\$\{?SERVICE:-sunshine-kitchen-board"\}/);
 });
