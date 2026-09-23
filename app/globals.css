@@ -190,6 +190,10 @@ input, select, .namebar input, .field input, .field select, .search {
   box-shadow: var(--shadow);
 }
 .issue .btn { width: 100%; }
+.issue .actions {
+  grid-template-columns: 1fr;
+}
+.issue .actions .done { grid-column: auto; }
 .issue.late { box-shadow: inset 4px 0 0 var(--late), var(--shadow); }
 .issue-top {
   display: flex;
