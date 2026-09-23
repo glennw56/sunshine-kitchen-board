@@ -6,9 +6,9 @@ This repository deploys **only** the Cloud Run test service `sunshine-kitchen-bo
 
 ## What v1 includes
 
-Four tabs, large tap targets, phone and tablet widths:
+Four tabs. A phone keeps a bottom bar and a single column of tickets. A counter tablet (about 768px wide and tall enough to sit on the pass) gets its own frame: a side rail, larger type, and Claim / Start / Done as three equal glove-sized buttons. Phone landscape stays on the phone layout so a short screen is not a squeezed tablet.
 
-1. **Board** — today's tickets sorted by due time. Claim, start, done. Shortage warning before start. Who is on what, early/late, Slack nudge. The same screen shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes and tickets. Layout is responsive for phone and tablet, not a phone-only view.
+1. **Board** — today's tickets sorted by due time, with the due time set large enough to read at arm's length. Claim, start, done. Shortage warning before start. Who is on what, early/late, Slack nudge. The same screen shows bake-day raw on-hand and cooked/finished counts for SKUs tied to today's recipes and tickets.
 2. **Raw** — on-hand and small kitchen adjustments for those same today's ingredients, read and written through sunshine-inventory-test. Link recipe lines to SKUs that already exist. Full CSV, recounts, and catalog browsing stay in the inventory app.
 3. **Cooked** — add, remove, and pull for today's finished SKUs that already exist in the tax-exempt inventory catalog. Unknown SKUs are refused.
 4. **Live** — read-only who's punched in and recent punches from the Sunshine time clock. Filter by store (Irondale by default) and keep the kitchen view on cooks. This app never clocks anyone in or out.
@@ -188,6 +188,6 @@ The Cloud Run service account needs `storage.objectAdmin` on the kitchen board b
 6. Square item **Test Cook** (`HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5XQX`) changes by the same cooked amount. No other Square item changes. The app does not recreate the item.
 7. On the owner screen, set a claimed ticket to "Due 20 min ago". An open board beeps. Slack posts to the test channel (auto, or the Slack nudge button). A second auto post waits 15 minutes.
 8. In Slack, `/recipe` lists today and `/recipe croissant` shows ingredients and steps.
-9. Check the board on a phone and on a tablet. Stock chips and tickets reflow, the four tabs stay on screen, and buttons stay full tap height.
+9. Phone width: bottom tabs, one column, Claim / Start / Done still full tap height (Done is the wide button). Tablet on the counter (portrait and landscape): side rail instead of the bottom bar, larger type, and three equal action buttons. Landscape shows two ticket columns. Read a due time from arm's length.
 
 Owner login for the activity log and alert settings is the email above plus the generated password.

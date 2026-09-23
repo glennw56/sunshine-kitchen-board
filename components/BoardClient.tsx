@@ -103,7 +103,7 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
   }
 
   return (
-    <div>
+    <div className="board">
       <OverdueSound count={overdueCount} />
       <p className="meta">
         Late means still open {data.settings.overdueBufferMinutes} min past due. Slack re-alerts every{" "}
@@ -114,44 +114,30 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       {overdueCount > 0 ? (
         <div className="banner">{overdueCount} ticket{overdueCount === 1 ? "" : "s"} overdue. Sound is armed on this board.</div>
       ) : null}
-      <p className="meta">
-        On-hand for ingredients and finished items on today&apos;s tickets. The full catalog stays in sunshine-inventory-test.
-      </p>
-      <div className="stock-split" data-testid="bake-day-stock">
-        <StockStrip title="Raw on hand" lines={data.bakeDay.raw} />
-        <StockStrip title="Cooked on hand" lines={data.bakeDay.cooked} />
-      </div>
-      <section className="card">
-        <h2>Who&apos;s on what</h2>
-        {floor.length === 0 ? <p className="meta">Nobody has a claimed ticket.</p> : null}
-        {floor.map((row) => (
-          <div className="list-item" key={row.ticketId}>
-            <div>
-              <strong>{row.assignee || "Unassigned"}</strong>
-              <div className="meta">{row.recipe}</div>
-            </div>
-            <span className={`badge ${row.timing === "late" ? "late" : ""}`}>{row.status} · {row.timing}</span>
-          </div>
-        ))}
-      </section>
-      <div className="cards">
+      <div className="cards board-tickets">
         {data.cards.map((card) => (
           <article className="card" key={card.ticket.id} id={card.ticket.id}>
-            <div className="row">
-              {card.timing === "late" || card.timing === "early" || card.timing === "on-time" ? (
-                <span className={`badge ${card.timing === "late" ? "late" : card.timing === "early" ? "early" : ""}`}>
-                  {card.timing}
-                </span>
-              ) : null}
-              <span className="badge">{card.ticket.status}</span>
-              {card.ticket.assignee ? <span className="badge">{card.ticket.assignee}</span> : null}
+            <div className="ticket-top">
+              <div>
+                <div className="row">
+                  {card.timing === "late" || card.timing === "early" || card.timing === "on-time" ? (
+                    <span className={`badge ${card.timing === "late" ? "late" : card.timing === "early" ? "early" : ""}`}>
+                      {card.timing}
+                    </span>
+                  ) : null}
+                  <span className="badge">{card.ticket.status}</span>
+                  {card.ticket.assignee ? <span className="badge">{card.ticket.assignee}</span> : null}
+                </div>
+                <h2>{card.recipe?.name ?? "Recipe"}</h2>
+                <p className="meta">
+                  {card.recipe ? `${card.recipe.batchSize} ${card.recipe.batchUnit}` : ""}
+                  {" · "}prep {card.recipe?.prepMinutes ?? "?"} min
+                </p>
+              </div>
+              <p className="due">
+                {new Date(card.ticket.dueAt).toLocaleString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })}
+              </p>
             </div>
-            <h2>{card.recipe?.name ?? "Recipe"}</h2>
-            <p className="meta">
-              {card.recipe ? `${card.recipe.batchSize} ${card.recipe.batchUnit}` : ""} · due{" "}
-              {new Date(card.ticket.dueAt).toLocaleString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })}
-              {" · "}prep {card.recipe?.prepMinutes ?? "?"} min
-            </p>
             {card.shortages.length > 0 && card.ticket.status !== "done" ? (
               <div className="banner">
                 {card.shortages.map((line) => (
@@ -165,16 +151,18 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
             ) : null}
             {card.ticket.squareError ? <p className="error">Square: {card.ticket.squareError}</p> : null}
             {card.alert?.lastError ? <p className="error">Slack auto-alert: {card.alert.lastError}</p> : null}
-            <div className="row">
+            <div className="actions">
               <button className="btn" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("claim", card.ticket.id)}>
                 Claim
               </button>
               <button className="btn secondary" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("start", card.ticket.id, { ackShortage: confirmId === card.ticket.id })}>
                 {confirmId === card.ticket.id ? "Start anyway" : "Start"}
               </button>
-              <button className="btn" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("done", card.ticket.id)}>
+              <button className="btn done" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("done", card.ticket.id)}>
                 Done
               </button>
+            </div>
+            <div className="row extra-actions">
               <button className="btn ghost" disabled={pending !== null} onClick={() => act("nudge", card.ticket.id)}>
                 Slack nudge
               </button>
@@ -197,6 +185,26 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
             ) : null}
           </article>
         ))}
+      </div>
+      <section className="card board-floor">
+        <h2>Who&apos;s on what</h2>
+        {floor.length === 0 ? <p className="meta">Nobody has a claimed ticket.</p> : null}
+        {floor.map((row) => (
+          <div className="list-item" key={row.ticketId}>
+            <div>
+              <strong>{row.assignee || "Unassigned"}</strong>
+              <div className="meta">{row.recipe}</div>
+            </div>
+            <span className={`badge ${row.timing === "late" ? "late" : ""}`}>{row.status} · {row.timing}</span>
+          </div>
+        ))}
+      </section>
+      <p className="meta board-stock-note">
+        On-hand for ingredients and finished items on today&apos;s tickets. The full catalog stays in sunshine-inventory-test.
+      </p>
+      <div className="stock-split board-stock" data-testid="bake-day-stock">
+        <StockStrip title="Raw on hand" lines={data.bakeDay.raw} />
+        <StockStrip title="Cooked on hand" lines={data.bakeDay.cooked} />
       </div>
     </div>
   );

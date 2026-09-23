@@ -211,6 +211,17 @@ function stubTicket(partial: Pick<Ticket, "id" | "recipeId" | "status" | "batche
   };
 }
 
+test("tablet is its own floor layout, not a stretched phone", () => {
+  const css = fs.readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8");
+  const board = fs.readFileSync(path.join(process.cwd(), "components/BoardClient.tsx"), "utf8");
+  assert.match(css, /min-width:\s*768px\) and \(min-height:\s*640px\)/);
+  assert.match(css, /grid-template-columns:\s*11\.5rem/);
+  assert.match(css, /--tap:\s*3\.5rem/);
+  assert.match(board, /className="actions"/);
+  assert.match(board, /className="due"/);
+  assert.match(board, /className="btn done"/);
+});
+
 test("deploy script refuses any other service name", () => {
   const script = path.join(process.cwd(), "scripts/deploy.sh");
   assert.throws(() => execFileSync("bash", [script, "sunshine-inventory-test"], { encoding: "utf8" }));

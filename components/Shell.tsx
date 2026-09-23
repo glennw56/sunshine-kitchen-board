@@ -18,15 +18,7 @@ export async function Shell({
 }) {
   const session = await readSession();
   return (
-    <div className="shell">
-      <header className="top">
-        <div>
-          <h1 className="brand">Sunshine</h1>
-          <p className="sub">Kitchen board · America/Chicago</p>
-        </div>
-        <NameBar name={session.staffName} admin={session.adminEmail} />
-      </header>
-      {children}
+    <div className="app">
       <nav className="tabs" aria-label="Main">
         {TABS.map((tab) => (
           <Link key={tab.href} href={tab.href} className={active === tab.href ? "active" : ""}>
@@ -34,6 +26,16 @@ export async function Shell({
           </Link>
         ))}
       </nav>
+      <div className="shell">
+        <header className="top">
+          <div>
+            <h1 className="brand">Sunshine</h1>
+            <p className="sub">Kitchen board · America/Chicago</p>
+          </div>
+          <NameBar name={session.staffName} admin={session.adminEmail} />
+        </header>
+        {children}
+      </div>
     </div>
   );
 }
