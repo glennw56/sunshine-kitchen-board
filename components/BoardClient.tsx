@@ -217,7 +217,7 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
                         min="0"
                         step="any"
                         value={qty}
-                        placeholder={planned != null ? String(planned) : "0"}
+                        placeholder="How many"
                         onChange={(event) => setQty(event.target.value)}
                         autoFocus
                       />
