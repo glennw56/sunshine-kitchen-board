@@ -1,0 +1,72 @@
+import type { Recipe } from "./types";
+
+/** Sample bake-day recipes. SKUs must exist in the inventory catalog before Done will move stock. */
+export const SEED_RECIPES: Recipe[] = [
+  {
+    id: "croissant",
+    name: "Butter croissant",
+    finishedSku: "CROISSANT",
+    finishedName: "Butter croissant",
+    yieldQty: 24,
+    batchSize: 24,
+    batchUnit: "pastries",
+    prepMinutes: 90,
+    defaultDueTime: "10:00",
+    ingredients: [
+      { id: "cr-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 2, unit: "lb" },
+      { id: "cr-butter", sku: "BUTTER-UNS", name: "Unsalted butter", qty: 8, unit: "lb" },
+      { id: "cr-milk", sku: "MILK-WHOLE", name: "Whole milk", qty: 1, unit: "qt" },
+      { id: "cr-yeast", sku: "YEAST-INST", name: "Instant yeast", qty: 0.2, unit: "lb" },
+    ],
+    steps: [
+      { id: "cr-1", text: "Mix dough and lock in the butter block", minutes: 20, station: null, movesStock: false },
+      { id: "cr-2", text: "Proof until jiggly", minutes: 45, station: "proofer", movesStock: false },
+      { id: "cr-3", text: "Bake until deep gold", minutes: 18, station: "oven", movesStock: true },
+      { id: "cr-4", text: "Cool on the rack", minutes: 15, station: "fridge", movesStock: false },
+    ],
+  },
+  {
+    id: "cookie",
+    name: "Chocolate chip cookie",
+    finishedSku: "COOKIE-CCC",
+    finishedName: "Chocolate chip cookie",
+    yieldQty: 48,
+    batchSize: 4,
+    batchUnit: "dozen",
+    prepMinutes: 35,
+    defaultDueTime: "14:00",
+    ingredients: [
+      { id: "ck-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 1.5, unit: "lb" },
+      { id: "ck-sugar", sku: "SUGAR-GRAN", name: "Granulated sugar", qty: 1, unit: "lb" },
+      { id: "ck-chip", sku: "CHIP-CHOC", name: "Chocolate chips", qty: 2, unit: "lb" },
+      { id: "ck-butter", sku: "BUTTER-UNS", name: "Unsalted butter", qty: 1, unit: "lb" },
+      { id: "ck-egg", sku: "EGG-LARGE", name: "Large eggs", qty: 4, unit: "ea" },
+    ],
+    steps: [
+      { id: "ck-1", text: "Cream butter and sugars, add eggs", minutes: 10, station: null, movesStock: false },
+      { id: "ck-2", text: "Scoop and chill the sheet", minutes: 10, station: "fridge", movesStock: false },
+      { id: "ck-3", text: "Bake trays", minutes: 12, station: "oven", movesStock: true },
+    ],
+  },
+  {
+    id: "sourdough",
+    name: "Country sourdough",
+    finishedSku: "LOAF-SOUR",
+    finishedName: "Country sourdough loaf",
+    yieldQty: 8,
+    batchSize: 8,
+    batchUnit: "loaves",
+    prepMinutes: 70,
+    defaultDueTime: "06:30",
+    ingredients: [
+      { id: "sd-flour", sku: "FLOUR-AP", name: "All-purpose flour", qty: 6, unit: "lb" },
+      { id: "sd-salt", sku: "SALT-KOSHER", name: "Kosher salt", qty: 0.15, unit: "lb" },
+      { id: "sd-starter", sku: "STARTER", name: "Sourdough starter", qty: 2, unit: "lb" },
+    ],
+    steps: [
+      { id: "sd-1", text: "Mix and bulk ferment", minutes: 20, station: null, movesStock: false },
+      { id: "sd-2", text: "Proof in baskets", minutes: 40, station: "proofer", movesStock: false },
+      { id: "sd-3", text: "Bake in Dutch ovens", minutes: 40, station: "oven", movesStock: true },
+    ],
+  },
+];

@@ -1,0 +1,16 @@
+{
+  "items": [
+    { "sku": "FLOUR-AP", "name": "All-purpose flour", "onHand": 40, "unit": "lb", "category": "dry" },
+    { "sku": "BUTTER-UNS", "name": "Unsalted butter", "onHand": 2, "unit": "lb", "category": "dairy" },
+    { "sku": "MILK-WHOLE", "name": "Whole milk", "onHand": 8, "unit": "qt", "category": "fridge" },
+    { "sku": "YEAST-INST", "name": "Instant yeast", "onHand": 3, "unit": "lb", "category": "dry" },
+    { "sku": "SUGAR-GRAN", "name": "Granulated sugar", "onHand": 20, "unit": "lb", "category": "dry" },
+    { "sku": "CHIP-CHOC", "name": "Chocolate chips", "onHand": 10, "unit": "lb", "category": "dry" },
+    { "sku": "EGG-LARGE", "name": "Large eggs", "onHand": 36, "unit": "ea", "category": "fridge" },
+    { "sku": "SALT-KOSHER", "name": "Kosher salt", "onHand": 5, "unit": "lb", "category": "dry" },
+    { "sku": "STARTER", "name": "Sourdough starter", "onHand": 6, "unit": "lb", "category": "fridge" },
+    { "sku": "CROISSANT", "name": "Butter croissant", "onHand": 0, "unit": "ea", "category": "finished" },
+    { "sku": "COOKIE-CCC", "name": "Chocolate chip cookie", "onHand": 0, "unit": "ea", "category": "finished" },
+    { "sku": "LOAF-SOUR", "name": "Country sourdough loaf", "onHand": 0, "unit": "ea", "category": "cooked" }
+  ]
+}
