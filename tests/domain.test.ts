@@ -67,8 +67,23 @@ test("square adjustment is Test Cook at Irondale only", () => {
   );
   const source = fs.readFileSync(path.join(process.cwd(), "lib/square.ts"), "utf8");
   assert.equal(source.includes("/v2/catalog"), false);
+  assert.equal(source.includes("/v2/orders"), false);
   assert.equal(source.includes("upsert"), false);
   assert.equal(source.includes(SQUARE_TEST_COOK.forbiddenLocationId), true);
+});
+
+test("v1 source has no cook predictions, demand forecasts, or Square sales", () => {
+  const banned = [/forecast/i, /predict/i, /auto-?order/i, /\/v2\/orders/, /sales metric/i];
+  const hits: string[] = [];
+  for (const root of ["app", "lib", "components"]) {
+    for (const file of walkSource(path.join(process.cwd(), root))) {
+      const text = fs.readFileSync(file, "utf8");
+      for (const pattern of banned) {
+        if (pattern.test(text)) hits.push(`${path.relative(process.cwd(), file)} matches ${pattern}`);
+      }
+    }
+  }
+  assert.deepEqual(hits, []);
 });
 
 test("overdue buffer and re-alert interval", () => {
@@ -193,6 +208,16 @@ test("claim, start, done moves raw down and cooked up", async () => {
   await assert.rejects(() => cookedMove("NOT-A-SKU", 1, "add", "Alex"), CatalogMissError);
   await assert.rejects(() => cookedMove("FLOUR-AP", 1, "pull", "Alex"), /not a cooked/);
 });
+
+function walkSource(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkSource(full));
+    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
 
 function stubTicket(partial: Pick<Ticket, "id" | "recipeId" | "status" | "batches">): Ticket {
   return {

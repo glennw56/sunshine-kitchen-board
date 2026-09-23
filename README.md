@@ -15,7 +15,7 @@ Four tabs. A phone keeps a bottom bar and a single column of tickets. A counter 
 
 Also in v1: Slack recipe read (`/recipe`), overdue sound on an open board, Slack auto-alert after a 10 minute buffer, re-alert every 15 minutes, and a Square inventory adjustment on the single item **Test Cook**.
 
-Not in v1: full ERP, auto-ordering, Square cook predictions, demand forecasting, multi-location inventory, clock-in on this app.
+Not in v1, and not in this PR: full ERP, auto-ordering, Square sales metrics, cook predictions, and demand forecasting. That phase starts only after v1 is live. Also out: multi-location inventory and clock-in on this app.
 
 ## Local setup
 
@@ -119,7 +119,7 @@ with `type: ADJUSTMENT` for variation `HRFLTIDM2ZHZNXN4N4EN6WFQ` at `L4CK6YWGT5X
 - Increase: `from_state NONE` → `to_state IN_STOCK`
 - Decrease (remove and pull): `from_state IN_STOCK` → `to_state WASTE`
 
-The Square client throws if a request path is anything except that batch-change or a count read of this variation, or if the body mentions another id or the Homebased location. The current sellable/ecom flags are left as the owner created them.
+The Square client throws if a request path is anything except that batch-change or a count read of this variation, or if the body mentions another id or the Homebased location. It does not read Square sales, orders, or catalog, and it does not forecast demand. The current sellable/ecom flags are left as the owner created them.
 
 Set `SQUARE_ACCESS_TOKEN` to a token for that Square account. A missing token is reported on the ticket; inventory still moves so the catalog check can be verified separately. Use **Retry Square** on the card if inventory moved and Square did not.
 
