@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import { isOverdue, shouldSendAutoAlert, timingLabel } from "../lib/alerts";
-import { bakeDayStock, claimTicket, completeTicket, cookedMove, shortageLines, startTicket, stockDeltas } from "../lib/board";
+import { bakeDayStock, boardSnapshot, claimTicket, completeTicket, cookedMove, plannedStartAt, retrySquare, shortageLines, startTicket, stockDeltas } from "../lib/board";
 import { SQUARE_TEST_COOK } from "../lib/constants";
 import { applyDeltaToDocument, CatalogMissError, extractCatalogFromText } from "../lib/inventory/normalize";
 import { SEED_RECIPES } from "../lib/seed-data";
@@ -102,6 +102,7 @@ test("overdue buffer and re-alert interval", () => {
     doneAt: null,
     shortageAck: false,
     stockMoved: false,
+    qtyMade: null,
     squareMoved: false,
     squareError: null,
     createdAt: dueAt,
@@ -196,15 +197,57 @@ test("claim, start, done moves raw down and cooked up", async () => {
   assert.equal(blocked.ok, false);
   const started = await startTicket(ticket.id, "Alex", true);
   assert.equal(started.ok, true);
-  const done = await completeTicket(ticket.id, "Alex");
+  await assert.rejects(() => completeTicket(ticket.id, "Alex", 0), /Amount made/);
+  const calls: { body: string }[] = [];
+  const originalFetch = globalThis.fetch;
+  process.env.SQUARE_ACCESS_TOKEN = "sq-test-token";
+  globalThis.fetch = async (_input, init) => {
+    calls.push({ body: String(init?.body ?? "") });
+    return new Response("nope", { status: 500 });
+  };
+  let done: Awaited<ReturnType<typeof completeTicket>>;
+  try {
+    done = await completeTicket(ticket.id, "Alex", 18);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   assert.equal(done.ok, true);
+  assert.equal(done.qtyMade, 18);
+  assert.match(done.squareError || "", /Square inventory 500/);
+  const firstSquare = JSON.parse(calls[0].body) as {
+    changes: { adjustment: { quantity: string; catalog_object_id: string; location_id: string } }[];
+  };
+  assert.equal(firstSquare.changes[0].adjustment.quantity, "18");
+  assert.equal(firstSquare.changes[0].adjustment.catalog_object_id, SQUARE_TEST_COOK.variationId);
+  assert.equal(firstSquare.changes[0].adjustment.location_id, SQUARE_TEST_COOK.locationId);
   const items = (await import("../lib/inventory/file")).readFileCatalog().items;
   const butter = items.find((item) => item.sku === "BUTTER-UNS");
   const finished = items.find((item) => item.sku === "CROISSANT");
   assert.equal(butter?.onHand, 2 - 8);
-  assert.equal(finished?.onHand, 24);
-  const deltas = stockDeltas(recipe, 1);
-  assert.ok(deltas.some((d) => d.sku === "CROISSANT" && d.delta === 24));
+  assert.equal(finished?.onHand, 18);
+  assert.equal(loadDb().tickets.find((row) => row.id === ticket.id)?.qtyMade, 18);
+  calls.length = 0;
+  process.env.SQUARE_ACCESS_TOKEN = "sq-test-token";
+  globalThis.fetch = async (_input, init) => {
+    calls.push({ body: String(init?.body ?? "") });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const retried = await retrySquare(ticket.id, "Alex");
+    assert.equal(retried.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.SQUARE_ACCESS_TOKEN = "";
+  }
+  const retryBody = JSON.parse(calls[0].body) as {
+    changes: { adjustment: { quantity: string; catalog_object_id: string } }[];
+  };
+  assert.equal(retryBody.changes[0].adjustment.quantity, "18");
+  assert.equal(retryBody.changes[0].adjustment.catalog_object_id, SQUARE_TEST_COOK.variationId);
+  const deltas = stockDeltas(recipe, 1, 18);
+  assert.ok(deltas.some((d) => d.sku === "CROISSANT" && d.delta === 18));
+  assert.ok(deltas.some((d) => d.sku === "BUTTER-UNS" && d.delta === -8));
+  assert.ok(stockDeltas(recipe, 1).some((d) => d.sku === "CROISSANT" && d.delta === 24));
   await assert.rejects(() => cookedMove("NOT-A-SKU", 1, "add", "Alex"), CatalogMissError);
   await assert.rejects(() => cookedMove("FLOUR-AP", 1, "pull", "Alex"), /not a cooked/);
 });
@@ -229,6 +272,7 @@ function stubTicket(partial: Pick<Ticket, "id" | "recipeId" | "status" | "batche
     doneAt: null,
     shortageAck: false,
     stockMoved: false,
+    qtyMade: null,
     squareMoved: false,
     squareError: null,
     createdAt: "2026-09-23T12:00:00.000Z",
@@ -242,9 +286,32 @@ test("tablet is its own floor layout, not a stretched phone", () => {
   assert.match(css, /min-width:\s*768px\) and \(min-height:\s*640px\)/);
   assert.match(css, /grid-template-columns:\s*11\.5rem/);
   assert.match(css, /--tap:\s*3\.5rem/);
+  assert.match(css, /\.schedule-row/);
+  assert.match(board, /Today/);
+  assert.match(board, /schedule-row/);
+  assert.match(board, /Amount made/);
   assert.match(board, /className="actions"/);
   assert.match(board, /className="due"/);
   assert.match(board, /className="btn done"/);
+});
+
+test("day board orders tasks by start time", async () => {
+  assert.equal(plannedStartAt("2026-09-23T15:00:00.000Z", 90), "2026-09-23T13:30:00.000Z");
+  assert.equal(plannedStartAt("2026-09-23T11:30:00.000Z", 70), "2026-09-23T10:20:00.000Z");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kb-sort-"));
+  process.env.DATA_DIR = dir;
+  process.env.INVENTORY_TRANSPORT = "file";
+  process.env.ADMIN_INITIAL_PASSWORD = "test-password-please";
+  process.env.AUTH_SECRET = "test-secret-at-least-16";
+  const snap = await boardSnapshot();
+  const starts = snap.cards.map((card) => card.startAt);
+  assert.deepEqual(starts, [...starts].sort((a, b) => a.localeCompare(b)));
+  const sour = snap.cards.find((card) => card.ticket.recipeId === "sourdough");
+  const cross = snap.cards.find((card) => card.ticket.recipeId === "croissant");
+  const cookie = snap.cards.find((card) => card.ticket.recipeId === "cookie");
+  assert.ok(sour && cross && cookie);
+  assert.ok(sour.startAt < cross.startAt && cross.startAt < cookie.startAt);
+  assert.equal(cross.startAt, plannedStartAt(cross.ticket.dueAt, cross.recipe?.prepMinutes ?? 0));
 });
 
 test("deploy script refuses any other service name", () => {

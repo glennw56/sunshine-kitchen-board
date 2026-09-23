@@ -158,6 +158,63 @@ input, select, .namebar input, .field input, .field select, .search {
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--line);
 }
+.today-heading {
+  margin: 0.1rem 0 0.45rem;
+  font-size: 2.1rem;
+  color: var(--wine);
+  line-height: 1;
+}
+.clocked-in {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0 0 0.75rem;
+}
+.schedule {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: white;
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.schedule-empty { padding: 1rem; }
+.schedule-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: calc(var(--tap) + 0.85rem);
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: white;
+  color: inherit;
+  text-align: left;
+}
+.schedule-row.open { background: #fffdfb; }
+.schedule-row.late { box-shadow: inset 4px 0 0 var(--late); }
+.schedule-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 800;
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+.schedule-detail {
+  padding: 0.15rem 1rem 1rem;
+  background: #fffdfb;
+  border-bottom: 1px solid var(--line);
+}
+.qty-prompt {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+.qty-prompt label { font-weight: 800; }
+.qty-prompt input { width: 100%; }
 .qty { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 1.25rem; }
 .stock-split { display: grid; gap: 0.75rem; }
 .stock-split > .card { margin: 0; }
@@ -235,6 +292,9 @@ input, select, .namebar input, .field input, .field select, .search {
   .card { padding: 1.25rem 1.35rem; }
   .card h2 { font-size: 2rem; }
   .due { font-size: 2.15rem; }
+  .today-heading { font-size: 2.7rem; }
+  .schedule-row { min-height: 5.4rem; padding: 0.95rem 1.2rem; }
+  .schedule-name { font-size: 1.55rem; }
   .meta { font-size: 1.05rem; }
   .badge { min-height: 2.2rem; font-size: 1rem; }
   .btn { font-size: 1.25rem; }

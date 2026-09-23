@@ -50,6 +50,8 @@ export type Ticket = {
   doneAt: string | null;
   shortageAck: boolean;
   stockMoved: boolean;
+  /** Finished units the cook entered on Done. Drives cooked stock and Square. */
+  qtyMade: number | null;
   squareMoved: boolean;
   squareError: string | null;
   createdAt: string;

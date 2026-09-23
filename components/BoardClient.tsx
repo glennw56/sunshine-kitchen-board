@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { OverdueSound } from "./OverdueSound";
 
 type Shortage = {
@@ -19,12 +19,14 @@ type Card = {
     assignee: string | null;
     dueAt: string;
     batches: number;
+    qtyMade: number | null;
     stockMoved: boolean;
     squareMoved: boolean;
     squareError: string | null;
   };
   recipe: {
     name: string;
+    yieldQty: number;
     batchSize: number;
     batchUnit: string;
     prepMinutes: number;
@@ -32,6 +34,7 @@ type Card = {
     steps: { id: string; text: string; minutes: number; station: string | null; movesStock: boolean }[];
   } | null;
   shortages: Shortage[];
+  startAt: string;
   timing: string;
   overdue: boolean;
   alert: { lastError: string | null; count: number } | null;
@@ -49,7 +52,6 @@ type StockLine = {
 
 type Snapshot = {
   cards: Card[];
-  onTheFloor: { ticketId: string; recipe: string; assignee: string | null; status: string; timing: string }[];
   inventoryError: string | null;
   settings: { overdueBufferMinutes: number; realertMinutes: number };
   bakeDay: { raw: StockLine[]; cooked: StockLine[] };
@@ -60,6 +62,10 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [qtyPrompt, setQtyPrompt] = useState<string | null>(null);
+  const [qty, setQty] = useState("");
+  const [cooks, setCooks] = useState<string[]>([]);
   const overdueCount = data.cards.filter((card) => card.overdue).length;
 
   async function reload() {
@@ -76,7 +82,22 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
     return () => clearInterval(timer);
   }, []);
 
-  const floor = useMemo(() => data.onTheFloor, [data]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/live?kitchenOnly=1", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((body: { punchedIn?: { name?: string }[] }) => {
+        if (cancelled || !Array.isArray(body.punchedIn)) return;
+        const names = body.punchedIn
+          .map((person) => person.name?.trim())
+          .filter((name): name is string => Boolean(name));
+        setCooks([...new Set(names)]);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function act(action: string, ticketId: string, extra: Record<string, unknown> = {}) {
     setPending(`${action}:${ticketId}`);
@@ -98,109 +119,159 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       return;
     }
     setConfirmId(null);
+    if (action === "done") setQtyPrompt(null);
     if (body.squareError) setError(`Inventory moved. Square: ${body.squareError}`);
     await reload();
+  }
+
+  function askDone(ticketId: string) {
+    setOpenId(ticketId);
+    setQtyPrompt(ticketId);
+    setQty("");
+    setError(null);
+  }
+
+  function confirmDone(ticketId: string) {
+    const amount = Number(qty);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Enter how many you made.");
+      return;
+    }
+    void act("done", ticketId, { qtyMade: amount });
   }
 
   return (
     <div className="board">
       <OverdueSound count={overdueCount} />
-      <p className="meta">
-        Late means still open {data.settings.overdueBufferMinutes} min past due. Slack re-alerts every{" "}
-        {data.settings.realertMinutes} min.
-      </p>
+      <h2 className="today-heading">Today</h2>
+      {cooks.length > 0 ? (
+        <div className="clocked-in" aria-label="Cooks clocked in">
+          {cooks.map((name) => (
+            <span className="badge" key={name}>{name}</span>
+          ))}
+        </div>
+      ) : null}
       {data.inventoryError ? <p className="error">{data.inventoryError}</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {overdueCount > 0 ? (
-        <div className="banner">{overdueCount} ticket{overdueCount === 1 ? "" : "s"} overdue. Sound is armed on this board.</div>
+        <div className="banner">{overdueCount} task{overdueCount === 1 ? "" : "s"} overdue.</div>
       ) : null}
-      <div className="cards board-tickets">
-        {data.cards.map((card) => (
-          <article className="card" key={card.ticket.id} id={card.ticket.id}>
-            <div className="ticket-top">
-              <div>
-                <div className="row">
-                  {card.timing === "late" || card.timing === "early" || card.timing === "on-time" ? (
-                    <span className={`badge ${card.timing === "late" ? "late" : card.timing === "early" ? "early" : ""}`}>
-                      {card.timing}
-                    </span>
+      <ul className="schedule" data-testid="day-schedule">
+        {data.cards.length === 0 ? <li className="meta schedule-empty">Nothing on today's board.</li> : null}
+        {data.cards.map((card) => {
+          const open = openId === card.ticket.id;
+          const name = card.recipe?.name ?? "Task";
+          const planned = card.recipe ? card.recipe.yieldQty * card.ticket.batches : null;
+          return (
+            <li key={card.ticket.id} id={card.ticket.id}>
+              <button
+                type="button"
+                className={`schedule-row${open ? " open" : ""}${card.overdue ? " late" : ""}`}
+                aria-expanded={open}
+                onClick={() => setOpenId(open ? null : card.ticket.id)}
+              >
+                <span className="due">{clockLabel(card.startAt)}</span>
+                <span className="schedule-name">{name}</span>
+                <span className={`badge ${card.overdue || card.timing === "late" ? "late" : ""}`}>{card.ticket.status}</span>
+              </button>
+              {open ? (
+                <div className="schedule-detail">
+                  <p className="meta">
+                    Start {clockLabel(card.startAt)}
+                    {" · "}due {clockLabel(card.ticket.dueAt)}
+                    {card.recipe ? ` · ${card.recipe.batchSize} ${card.recipe.batchUnit}` : ""}
+                    {planned != null ? ` · plan ${planned}` : ""}
+                    {card.ticket.assignee ? ` · ${card.ticket.assignee}` : ""}
+                    {card.ticket.qtyMade != null ? ` · made ${card.ticket.qtyMade}` : ""}
+                  </p>
+                  {card.shortages.length > 0 && card.ticket.status !== "done" ? (
+                    <div className="banner">
+                      {card.shortages.map((line) => (
+                        <div key={line.sku}>
+                          {line.missingSku
+                            ? `${line.sku} is not in the inventory catalog`
+                            : `${line.name}: have ${line.onHand} ${line.unit}, need ${line.need}`}
+                        </div>
+                      ))}
+                    </div>
                   ) : null}
-                  <span className="badge">{card.ticket.status}</span>
-                  {card.ticket.assignee ? <span className="badge">{card.ticket.assignee}</span> : null}
-                </div>
-                <h2>{card.recipe?.name ?? "Recipe"}</h2>
-                <p className="meta">
-                  {card.recipe ? `${card.recipe.batchSize} ${card.recipe.batchUnit}` : ""}
-                  {" · "}prep {card.recipe?.prepMinutes ?? "?"} min
-                </p>
-              </div>
-              <p className="due">
-                {new Date(card.ticket.dueAt).toLocaleString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })}
-              </p>
-            </div>
-            {card.shortages.length > 0 && card.ticket.status !== "done" ? (
-              <div className="banner">
-                {card.shortages.map((line) => (
-                  <div key={line.sku}>
-                    {line.missingSku
-                      ? `${line.sku} is not in the inventory catalog`
-                      : `${line.name}: have ${line.onHand} ${line.unit}, need ${line.need}`}
+                  {card.ticket.squareError ? <p className="error">Square: {card.ticket.squareError}</p> : null}
+                  {card.alert?.lastError ? <p className="error">Slack auto-alert: {card.alert.lastError}</p> : null}
+                  {qtyPrompt === card.ticket.id ? (
+                    <form
+                      className="qty-prompt"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        confirmDone(card.ticket.id);
+                      }}
+                    >
+                      <label htmlFor={`qty-${card.ticket.id}`}>
+                        Amount made
+                        {planned != null ? <span className="meta"> Plan was {planned}.</span> : null}
+                      </label>
+                      <input
+                        id={`qty-${card.ticket.id}`}
+                        aria-label="Amount made"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="any"
+                        value={qty}
+                        placeholder="How many"
+                        onChange={(event) => setQty(event.target.value)}
+                        autoFocus
+                      />
+                      <div className="actions">
+                        <button className="btn secondary" type="button" disabled={pending !== null} onClick={() => setQtyPrompt(null)}>
+                          Back
+                        </button>
+                        <button className="btn done" type="submit" disabled={pending !== null}>
+                          Finish
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="actions">
+                      <button className="btn" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("claim", card.ticket.id)}>
+                        Claim
+                      </button>
+                      <button className="btn secondary" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("start", card.ticket.id, { ackShortage: confirmId === card.ticket.id })}>
+                        {confirmId === card.ticket.id ? "Start anyway" : "Start"}
+                      </button>
+                      <button className="btn done" disabled={pending !== null || card.ticket.status === "done"} onClick={() => askDone(card.ticket.id)}>
+                        Done
+                      </button>
+                    </div>
+                  )}
+                  <div className="row extra-actions">
+                    <button className="btn ghost" disabled={pending !== null} onClick={() => act("nudge", card.ticket.id)}>
+                      Slack nudge
+                    </button>
+                    {card.ticket.stockMoved && !card.ticket.squareMoved ? (
+                      <button className="btn ghost" disabled={pending !== null} onClick={() => act("square-retry", card.ticket.id)}>
+                        Retry Square
+                      </button>
+                    ) : null}
                   </div>
-                ))}
-              </div>
-            ) : null}
-            {card.ticket.squareError ? <p className="error">Square: {card.ticket.squareError}</p> : null}
-            {card.alert?.lastError ? <p className="error">Slack auto-alert: {card.alert.lastError}</p> : null}
-            <div className="actions">
-              <button className="btn" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("claim", card.ticket.id)}>
-                Claim
-              </button>
-              <button className="btn secondary" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("start", card.ticket.id, { ackShortage: confirmId === card.ticket.id })}>
-                {confirmId === card.ticket.id ? "Start anyway" : "Start"}
-              </button>
-              <button className="btn done" disabled={pending !== null || card.ticket.status === "done"} onClick={() => act("done", card.ticket.id)}>
-                Done
-              </button>
-            </div>
-            <div className="row extra-actions">
-              <button className="btn ghost" disabled={pending !== null} onClick={() => act("nudge", card.ticket.id)}>
-                Slack nudge
-              </button>
-              {card.ticket.stockMoved && !card.ticket.squareMoved ? (
-                <button className="btn ghost" disabled={pending !== null} onClick={() => act("square-retry", card.ticket.id)}>
-                  Retry Square
-                </button>
+                  {card.recipe ? (
+                    <ol className="steps">
+                      {card.recipe.steps.map((step) => (
+                        <li key={step.id}>
+                          {step.text} · {step.minutes} min
+                          {step.station ? ` · ${step.station}` : ""}
+                          {step.movesStock ? " · moves stock" : ""}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </div>
               ) : null}
-            </div>
-            {card.recipe ? (
-              <ol className="steps">
-                {card.recipe.steps.map((step) => (
-                  <li key={step.id}>
-                    {step.text} · {step.minutes} min
-                    {step.station ? ` · ${step.station}` : ""}
-                    {step.movesStock ? " · moves stock" : ""}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </article>
-        ))}
-      </div>
-      <section className="card board-floor">
-        <h2>Who&apos;s on what</h2>
-        {floor.length === 0 ? <p className="meta">Nobody has a claimed ticket.</p> : null}
-        {floor.map((row) => (
-          <div className="list-item" key={row.ticketId}>
-            <div>
-              <strong>{row.assignee || "Unassigned"}</strong>
-              <div className="meta">{row.recipe}</div>
-            </div>
-            <span className={`badge ${row.timing === "late" ? "late" : ""}`}>{row.status} · {row.timing}</span>
-          </div>
-        ))}
-      </section>
+            </li>
+          );
+        })}
+      </ul>
       <p className="meta board-stock-note">
-        On-hand for ingredients and finished items on today&apos;s tickets. The full catalog stays in sunshine-inventory-test.
+        On-hand for ingredients and finished items on today&apos;s tasks.
       </p>
       <div className="stock-split board-stock" data-testid="bake-day-stock">
         <StockStrip title="Raw on hand" lines={data.bakeDay.raw} />
@@ -208,6 +279,14 @@ export function BoardClient({ initial }: { initial: Snapshot }) {
       </div>
     </div>
   );
+}
+
+function clockLabel(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    timeZone: "America/Chicago",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function StockStrip({ title, lines }: { title: string; lines: StockLine[] }) {
